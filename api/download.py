@@ -81,31 +81,38 @@ def parse_nfse(chave: str, nsu: int, xml: str, cnpj_contribuinte: str = "") -> d
         pass
 
     # ── Classify: Emitida / Recebida / Indefinida ─────────────────────────
+    # Rule: based solely on CNPJPrestador vs the client's CNPJ.
+    #   Emitida  → client IS the prestador (they issued the invoice)
+    #   Recebida → another CNPJ is the prestador (issued BY someone else TO/for client)
+    #   Indefinida → can't extract prestador CNPJ from the XML
     if cnpj_contribuinte:
         cnpj_d  = _digits(cnpj_contribuinte)
         prest_d = _digits(row["CNPJPrestador"])
         tom_d   = _digits(row["CNPJTomador"])
-        if prest_d and prest_d == cnpj_d:
-            row["Tipo"] = "Emitida"
-        elif tom_d and tom_d == cnpj_d:
-            row["Tipo"] = "Recebida"
-        # else: stays "Indefinida" — CNPJ not found in XML; kept in both filters
+
+        if prest_d == cnpj_d:
+            row["Tipo"] = "Emitida"          # client emitted this note
+        elif prest_d:
+            row["Tipo"] = "Recebida"         # another prestador emitted it
+        elif tom_d == cnpj_d:
+            row["Tipo"] = "Recebida"         # client is tomador → received
+        # else: prestador unknown, tomador unknown → stays "Indefinida"
 
     return row
 
 
 def _filter_by_tipo(results: list, xlsx_rows: list, tipo: str) -> tuple:
     """
-    Filter results and xlsx_rows by NFS-e type without losing notes:
+    Filter results and xlsx_rows by NFS-e type:
     • "todas"    → keep everything
-    • "emitidas" → Emitida + Indefinida  (Indefinida kept so nothing is lost)
-    • "recebidas"→ Recebida + Indefinida
+    • "emitidas" → only Emitida  (strict: client must be prestador)
+    • "recebidas"→ Recebida + Indefinida (conservative: keep unknowns to avoid losses)
     """
     if tipo == "todas":
         return results, xlsx_rows
 
     keep = {
-        "emitidas":  {"Emitida",  "Indefinida"},
+        "emitidas":  {"Emitida"},
         "recebidas": {"Recebida", "Indefinida"},
     }.get(tipo, {"Emitida", "Recebida", "Indefinida"})
 

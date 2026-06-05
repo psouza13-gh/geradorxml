@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NFS-e Downloader</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    .spinner { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    input[type="file"]::file-selector-button {
+      background: #3b82f6; color: white; border: none;
+      padding: 6px 14px; border-radius: 6px; cursor: pointer; margin-right: 10px;
+    }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen flex items-center justify-center p-4">
+
+  <div class="w-full max-w-xl">
+
+    <!-- Header -->
+    <div class="mb-8 text-center">
+      <div class="inline-flex items-center gap-2 bg-blue-600/10 border border-blue-500/20 rounded-full px-4 py-1 mb-4">
+        <span class="text-blue-400 text-sm font-medium">Sistema Nacional NFS-e</span>
+      </div>
+      <h1 class="text-3xl font-bold text-white mb-2">NFS-e Downloader</h1>
+      <p class="text-gray-400 text-sm">Baixe todas as notas fiscais de serviço em um arquivo ZIP</p>
+    </div>
+
+    <!-- Card -->
+    <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-2xl">
+      <form id="form" class="space-y-5">
+
+        <!-- CNPJ + Nome -->
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">CNPJ <span class="text-red-400">*</span></label>
+            <input id="cnpj" name="cnpj" type="text" placeholder="00.000.000/0001-00"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition"
+              required />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Nome / Razão Social</label>
+            <input id="nome" name="nome" type="text" placeholder="Empresa LTDA"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition" />
+          </div>
+        </div>
+
+        <!-- Certificate -->
+        <div>
+          <label class="block text-xs font-medium text-gray-400 mb-1">Certificado Digital A1 (.pfx / .p12) <span class="text-red-400">*</span></label>
+          <input id="cert" name="cert" type="file" accept=".pfx,.p12"
+            class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-blue-500 transition"
+            required />
+          <p class="text-xs text-gray-500 mt-1">O certificado é usado apenas durante o download e não é armazenado.</p>
+        </div>
+
+        <!-- Password -->
+        <div>
+          <label class="block text-xs font-medium text-gray-400 mb-1">Senha do Certificado <span class="text-red-400">*</span></label>
+          <input id="password" name="password" type="password" placeholder="••••••••"
+            class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition"
+            required />
+        </div>
+
+        <!-- Period -->
+        <div>
+          <label class="block text-xs font-medium text-gray-400 mb-2">Período</label>
+          <div class="grid grid-cols-2 gap-3 mb-2">
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">De</label>
+              <input id="data_inicial" name="data_inicial" type="date"
+                class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition" required />
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Até</label>
+              <input id="data_final" name="data_final" type="date"
+                class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition" required />
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button type="button" onclick="setPeriod('mes')"
+              class="text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 px-3 py-1 rounded-lg transition">Este mês</button>
+            <button type="button" onclick="setPeriod('mes_ant')"
+              class="text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 px-3 py-1 rounded-lg transition">Mês anterior</button>
+            <button type="button" onclick="setPeriod('ano')"
+              class="text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 px-3 py-1 rounded-lg transition">Este ano</button>
+            <button type="button" onclick="setPeriod('tudo')"
+              class="text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 px-3 py-1 rounded-lg transition">Tudo</button>
+          </div>
+        </div>
+
+        <!-- Advanced -->
+        <details class="group">
+          <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-300 transition select-none">
+            ▸ Opções avançadas
+          </summary>
+          <div class="mt-3 space-y-3">
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-medium text-gray-400 mb-1">NSU Inicial</label>
+                <input id="nsu_inicial" name="nsu_inicial" type="number" value="0" min="0"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition" />
+                <p class="text-xs text-gray-500 mt-1">0 = busca automática</p>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-400 mb-1">Ambiente</label>
+                <select id="ambiente" name="ambiente"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition">
+                  <option value="producao">Produção</option>
+                  <option value="homologacao">Homologação</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <!-- Submit -->
+        <button id="btn" type="submit"
+          class="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition text-sm flex items-center justify-center gap-2">
+          <span id="btn-text">Baixar NFS-e</span>
+          <svg id="btn-icon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+        </button>
+
+      </form>
+
+      <!-- Status -->
+      <div id="status" class="hidden mt-4"></div>
+    </div>
+
+    <!-- Footer -->
+    <p class="text-center text-xs text-gray-600 mt-6">
+      Dados processados em memória — nenhum certificado é armazenado no servidor.
+    </p>
+
+  </div>
+
+<script>
+  // Set default dates
+  const today = new Date();
+  const y = today.getFullYear(), m = today.getMonth(), d = today.getDate();
+  document.getElementById('data_inicial').value = new Date(y, m, 1).toISOString().slice(0,10);
+  document.getElementById('data_final').value   = today.toISOString().slice(0,10);
+
+  function setPeriod(p) {
+    const t = new Date();
+    let ini, fim = t.toISOString().slice(0,10);
+    if (p === 'mes') {
+      ini = new Date(t.getFullYear(), t.getMonth(), 1).toISOString().slice(0,10);
+    } else if (p === 'mes_ant') {
+      const last = new Date(t.getFullYear(), t.getMonth(), 0);
+      fim = last.toISOString().slice(0,10);
+      ini = new Date(last.getFullYear(), last.getMonth(), 1).toISOString().slice(0,10);
+    } else if (p === 'ano') {
+      ini = new Date(t.getFullYear(), 0, 1).toISOString().slice(0,10);
+    } else {
+      ini = '2023-01-01';
+      fim = new Date(t.getFullYear(), 11, 31).toISOString().slice(0,10);
+    }
+    document.getElementById('data_inicial').value = ini;
+    document.getElementById('data_final').value   = fim;
+  }
+
+  // Format CNPJ
+  document.getElementById('cnpj').addEventListener('input', function() {
+    let v = this.value.replace(/\D/g,'').slice(0,14);
+    if (v.length > 12) v = v.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/,'$1.$2.$3/$4-$5');
+    else if (v.length > 8) v = v.replace(/^(\d{2})(\d{3})(\d{3})(\d+)$/,'$1.$2.$3/$4');
+    else if (v.length > 5) v = v.replace(/^(\d{2})(\d{3})(\d+)$/,'$1.$2.$3');
+    else if (v.length > 2) v = v.replace(/^(\d{2})(\d+)$/,'$1.$2');
+    this.value = v;
+  });
+
+  function showStatus(type, msg) {
+    const el = document.getElementById('status');
+    const colors = { info:'bg-blue-900/40 border-blue-700 text-blue-300',
+                     error:'bg-red-900/40 border-red-700 text-red-300',
+                     success:'bg-green-900/40 border-green-700 text-green-300' };
+    el.className = `mt-4 rounded-xl border px-4 py-3 text-sm ${colors[type]}`;
+    el.textContent = msg;
+    el.classList.remove('hidden');
+  }
+
+  function setLoading(loading) {
+    const btn = document.getElementById('btn');
+    const txt = document.getElementById('btn-text');
+    const ico = document.getElementById('btn-icon');
+    btn.disabled = loading;
+    if (loading) {
+      txt.textContent = 'Processando... (pode levar alguns minutos)';
+      ico.innerHTML = '<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>';
+      ico.classList.add('spinner');
+      ico.setAttribute('viewBox','0 0 24 24');
+    } else {
+      txt.textContent = 'Baixar NFS-e';
+      ico.classList.remove('spinner');
+      ico.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />';
+    }
+  }
+
+  document.getElementById('form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    document.getElementById('status').classList.add('hidden');
+    setLoading(true);
+
+    const fd = new FormData(this);
+    // Strip CNPJ formatting
+    fd.set('cnpj', fd.get('cnpj').replace(/\D/g,''));
+
+    try {
+      showStatus('info', 'Conectando à API do Sistema Nacional NFS-e...');
+      const resp = await fetch('/api/download', { method: 'POST', body: fd });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+        showStatus('error', err.error || 'Erro desconhecido.');
+        return;
+      }
+
+      // Trigger ZIP download
+      const blob = await resp.blob();
+      const cd = resp.headers.get('Content-Disposition') || '';
+      const match = cd.match(/filename="?([^"]+)"?/);
+      const filename = match ? match[1] : 'NFS-e.zip';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+      showStatus('success', `✓ Download concluído: ${filename}`);
+    } catch (err) {
+      showStatus('error', `Erro de conexão: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  });
+</script>
+</body>
+</html>

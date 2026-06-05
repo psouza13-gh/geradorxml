@@ -1,0 +1,6 @@
+customtkinter>=5.2.0
+cryptography>=41.0.0
+requests>=2.31.0
+lxml>=4.9.0
+zeep>=4.2.1
+Pillow>=10.0.0

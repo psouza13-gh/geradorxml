@@ -1,0 +1,39 @@
+# Dados sensíveis — NUNCA subir
+data/
+*.pfx
+*.p12
+*.pem
+*.key
+*.p7b
+*.cer
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Temp files do cert_handler
+nfse_*.pem
+nfse_*.key.pem
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini

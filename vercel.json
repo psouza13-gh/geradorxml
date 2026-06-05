@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "api/download.py": { "maxDuration": 300 },
+    "api/health.py":   { "maxDuration": 10  }
+  },
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/api/$1" },
+    { "src": "/(.*)",     "dest": "/public/$1" }
+  ]
+}

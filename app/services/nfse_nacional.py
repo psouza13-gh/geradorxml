@@ -215,6 +215,15 @@ class NfseNacionalClient:
         if resp.status_code in (404, 204):
             return [], nsu, True
 
+        if resp.status_code in (401, 403):
+            log(f"  ⚠ Erro {resp.status_code} (não autorizado): {resp.text[:300]}")
+            log("  ⚠ O token de autenticação foi rejeitado pela API de distribuição.")
+            raise RuntimeError(
+                f"Autenticação rejeitada pela API NFS-e (HTTP {resp.status_code}). "
+                "O token de login/senha não é aceito pela API de distribuição de documentos. "
+                "Use o Certificado Digital A1 para baixar NFS-e."
+            )
+
         if not resp.ok:
             log(f"  Erro HTTP {resp.status_code}: {resp.text[:300]}")
             return [], nsu, True

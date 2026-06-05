@@ -216,6 +216,15 @@
   <!-- Status -->
   <div id="status" class="hidden rounded-xl border px-4 py-3 text-sm"></div>
 
+  <!-- Log detail (shown on error) -->
+  <div id="log-box" class="hidden bg-gray-900 border border-gray-700 rounded-xl p-4">
+    <div class="flex items-center justify-between mb-2">
+      <span class="text-xs font-semibold text-gray-400">Log de execução</span>
+      <button onclick="$('log-box').classList.add('hidden')" class="text-xs text-gray-500 hover:text-gray-300">✕</button>
+    </div>
+    <pre id="log-lines" class="text-xs text-gray-300 whitespace-pre-wrap break-all max-h-64 overflow-y-auto"></pre>
+  </div>
+
   <p class="text-center text-xs text-gray-600">
     O ZIP gerado contém os XMLs das NFS-e + uma planilha XLSX para análise.
   </p>
@@ -444,6 +453,7 @@ function setLoading(on) {
 $('form').addEventListener('submit', async e => {
   e.preventDefault();
   $('status').classList.add('hidden');
+  $('log-box').classList.add('hidden');
   setLoading(true);
   showStatus('info','Conectando à API do Sistema Nacional NFS-e…');
 
@@ -455,6 +465,7 @@ $('form').addEventListener('submit', async e => {
     if(!resp.ok) {
       const err = await resp.json().catch(()=>({error:`HTTP ${resp.status}`}));
       showStatus('error', err.error||'Erro desconhecido.');
+      showLog(err.log);
       return;
     }
     const blob = await resp.blob();
@@ -472,6 +483,12 @@ $('form').addEventListener('submit', async e => {
     setLoading(false);
   }
 });
+
+function showLog(lines) {
+  if(!lines || !lines.length) return;
+  $('log-lines').textContent = Array.isArray(lines) ? lines.join('\n') : String(lines);
+  $('log-box').classList.remove('hidden');
+}
 
 // ════════════════════════════════════════════════════════
 //   CLIENT MANAGER  (localStorage)

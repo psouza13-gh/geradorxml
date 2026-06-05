@@ -281,10 +281,13 @@ def download():
             )
 
         # ── Download NFS-e ─────────────────────────────────────────────────────
-        results = client.consultar_por_periodo(
-            data_inicial=data_ini, data_final=data_fim,
-            log=messages.append, nsu_inicial=nsu_ini,
-        )
+        try:
+            results = client.consultar_por_periodo(
+                data_inicial=data_ini, data_final=data_fim,
+                log=messages.append, nsu_inicial=nsu_ini,
+            )
+        except RuntimeError as e:
+            return jsonify({"error": str(e), "log": messages}), 401
 
         if not results:
             return jsonify({

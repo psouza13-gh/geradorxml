@@ -28,14 +28,26 @@ BASE_URL_TEST = "https://adn.producaorestrita.nfse.gov.br/contribuintes"
 # Endpoints are tried in order; the first one that returns valid DFe data is kept.
 PORTAL_BASE = "https://www.nfse.gov.br"
 PORTAL_DFE_CANDIDATES = [
+    # Based on confirmed MVC pages: /EmissorNacional/Dfe and /EmissorNacional/Distribuicao
+    "/EmissorNacional/api/Dfe/{nsu}",
+    "/EmissorNacional/api/Dfe/Get/{nsu}",
+    "/EmissorNacional/api/Dfe/ObterDFe/{nsu}",
+    "/EmissorNacional/api/Dfe/ObterDFe?ultimoNsu={nsu}",
+    "/EmissorNacional/api/Dfe/Distribuicao/{nsu}",
+    "/EmissorNacional/api/Dfe/Distribuicao?ultimoNsu={nsu}",
+    "/EmissorNacional/api/Distribuicao/{nsu}",
+    "/EmissorNacional/api/Distribuicao/Get/{nsu}",
+    "/EmissorNacional/api/Distribuicao/ObterDFe/{nsu}",
+    "/EmissorNacional/api/Distribuicao/ObterDFe?ultimoNsu={nsu}",
+    "/EmissorNacional/api/Distribuicao/DFe/{nsu}",
+    "/EmissorNacional/api/Distribuicao/DFe?ultimoNsu={nsu}",
+    # Other variations
+    "/EmissorNacional/api/DFe/{nsu}",
+    "/EmissorNacional/api/DFe/Get/{nsu}",
     "/EmissorNacional/api/distribuicao/DFe/{nsu}",
     "/EmissorNacional/api/contribuintes/DFe/{nsu}",
-    "/EmissorNacional/api/NfseNacional/DFe/{nsu}",
-    "/EmissorNacional/api/Dfe/Distribuicao/{nsu}",
-    "/EmissorNacional/api/dfe/{nsu}",
-    "/EmissorNacional/api/distribuicao/DFe?ultimoNsu={nsu}",
     "/EmissorNacional/api/contribuintes/DFe?ultimoNsu={nsu}",
-    "/EmissorNacional/api/NfseNacional/Distribuicao?ultimoNsu={nsu}",
+    "/EmissorNacional/api/dfe/distribuicao/{nsu}",
 ]
 
 MAX_ITERATIONS = 500   # safety cap (~25.000 notas)
@@ -222,15 +234,10 @@ class NfseNacionalClient:
         else:
             candidates = PORTAL_DFE_CANDIDATES
 
-        last_status = None
-        last_body   = ""
+        all_errors = []   # collect every attempt for diagnostics
 
         for path_tpl in candidates:
-            # Support both path params /{nsu} and query params ?ultimoNsu={nsu}
-            if "{nsu}" in path_tpl:
-                url = PORTAL_BASE + path_tpl.format(nsu=nsu)
-            else:
-                url = PORTAL_BASE + path_tpl
+            url = PORTAL_BASE + path_tpl.format(nsu=nsu)
 
             retry = 0
             resp  = None
@@ -252,38 +259,38 @@ class NfseNacionalClient:
             if resp is None or resp.status_code == 429:
                 continue
 
-            last_status = resp.status_code
-            last_body   = resp.text[:300]
+            status = resp.status_code
+            body   = resp.text[:300]
+            all_errors.append(f"  HTTP {status} {path_tpl.format(nsu='N')} → {body[:120]!r}")
 
-            if resp.status_code in (404, 204):
-                # Endpoint doesn't exist with this path — try next candidate
-                continue
-
-            if resp.status_code in (401, 403):
+            if status in (401, 403):
                 raise RuntimeError(
-                    f"Token rejeitado pela API do portal NFS-e (HTTP {resp.status_code}). "
+                    f"Token rejeitado pela API do portal NFS-e (HTTP {status}). "
                     "Tente fazer login novamente."
                 )
 
+            if status in (404, 204):
+                continue   # wrong endpoint, try next
+
             if not resp.ok:
-                log(f"  Portal endpoint {path_tpl}: HTTP {resp.status_code} — tentando próximo...")
+                log(f"  Portal endpoint {path_tpl}: HTTP {status} — tentando próximo...")
                 continue
 
             # Got a 2xx — parse and validate
             batch, prox_nsu, fim = self._parse_dfe_response(resp, log)
 
-            # Accept this endpoint if it returned valid data OR an explicit empty queue
             if not self._portal_dfe_path:
                 self._portal_dfe_path = path_tpl
                 log(f"  [Portal API endpoint descoberto: {path_tpl}]")
 
             return batch, prox_nsu, fim
 
-        # All candidates exhausted
+        # All candidates exhausted — show every attempt in the error
+        detail = "\n".join(all_errors)
         raise RuntimeError(
-            "Nenhum endpoint da API do portal NFS-e respondeu corretamente. "
-            f"Último status: HTTP {last_status}. Corpo: {last_body!r}\n"
-            "Entre em contato para atualização do endpoint, ou use o Certificado Digital A1."
+            "Nenhum endpoint da API do portal NFS-e respondeu corretamente.\n\n"
+            f"Tentativas:\n{detail}\n\n"
+            "Envie este log para suporte ou use o Certificado Digital A1."
         )
 
     def _buscar_dfe_batch(

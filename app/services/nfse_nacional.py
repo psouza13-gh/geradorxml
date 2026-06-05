@@ -23,6 +23,21 @@ from app.services.cert_handler import export_to_pem_files
 BASE_URL_PROD = "https://adn.nfse.gov.br/contribuintes"
 BASE_URL_TEST = "https://adn.producaorestrita.nfse.gov.br/contribuintes"
 
+# Portal backend API (used when authenticating with login/senha instead of certificate).
+# The portal proxies requests to adn.nfse.gov.br using a server-side certificate.
+# Endpoints are tried in order; the first one that returns valid DFe data is kept.
+PORTAL_BASE = "https://www.nfse.gov.br"
+PORTAL_DFE_CANDIDATES = [
+    "/EmissorNacional/api/distribuicao/DFe/{nsu}",
+    "/EmissorNacional/api/contribuintes/DFe/{nsu}",
+    "/EmissorNacional/api/NfseNacional/DFe/{nsu}",
+    "/EmissorNacional/api/Dfe/Distribuicao/{nsu}",
+    "/EmissorNacional/api/dfe/{nsu}",
+    "/EmissorNacional/api/distribuicao/DFe?ultimoNsu={nsu}",
+    "/EmissorNacional/api/contribuintes/DFe?ultimoNsu={nsu}",
+    "/EmissorNacional/api/NfseNacional/Distribuicao?ultimoNsu={nsu}",
+]
+
 MAX_ITERATIONS = 500   # safety cap (~25.000 notas)
 
 
@@ -50,6 +65,13 @@ class NfseNacionalClient:
         self.cert_password = cert_password
         self.base_url = BASE_URL_PROD if ambiente == "producao" else BASE_URL_TEST
         self._session: requests.Session | None = session  # may be pre-authenticated
+        # When session has a Bearer token we must use the portal API (not adn.nfse.gov.br
+        # which requires mTLS and refuses all other auth with HTTP 496).
+        self._use_portal_api: bool = (
+            session is not None
+            and bool((session.headers or {}).get("Authorization", "").startswith("Bearer "))
+        )
+        self._portal_dfe_path: str | None = None  # discovered on first successful call
 
     # ─── Session ──────────────────────────────────────────────────────────
 
@@ -182,13 +204,97 @@ class NfseNacionalClient:
         def _noop(_): pass
         return self._buscar_dfe_batch(nsu, _noop)
 
+    def _buscar_dfe_batch_portal(
+        self, nsu: int, log: Callable[[str], None]
+    ) -> Tuple[List[Tuple[str, str]], int, bool]:
+        """
+        DFe distribution via the portal backend API (Bearer token auth).
+        Auto-discovers the correct endpoint by trying candidates in order.
+        The portal proxies the request to adn.nfse.gov.br using a server certificate.
+        """
+        session = self._get_session()
+
+        # If endpoint already discovered, use it directly
+        if self._portal_dfe_path:
+            candidates = [self._portal_dfe_path]
+        else:
+            candidates = PORTAL_DFE_CANDIDATES
+
+        last_status = None
+        last_body   = ""
+
+        for path_tpl in candidates:
+            # Support both path params /{nsu} and query params ?ultimoNsu={nsu}
+            if "{nsu}" in path_tpl:
+                url = PORTAL_BASE + path_tpl.format(nsu=nsu)
+            else:
+                url = PORTAL_BASE + path_tpl
+
+            retry = 0
+            resp  = None
+            while retry < 3:
+                try:
+                    resp = session.get(url, timeout=60)
+                except requests.RequestException as e:
+                    log(f"  Erro de conexão: {e}")
+                    return [], nsu, True
+
+                if resp.status_code == 429:
+                    wait = int(resp.headers.get("Retry-After", 0)) or 10 * (retry + 1)
+                    log(f"  Rate limit (429) — aguardando {wait}s ...")
+                    time.sleep(wait)
+                    retry += 1
+                    continue
+                break
+
+            if resp is None or resp.status_code == 429:
+                continue
+
+            last_status = resp.status_code
+            last_body   = resp.text[:300]
+
+            if resp.status_code in (404, 204):
+                # Endpoint doesn't exist with this path — try next candidate
+                continue
+
+            if resp.status_code in (401, 403):
+                raise RuntimeError(
+                    f"Token rejeitado pela API do portal NFS-e (HTTP {resp.status_code}). "
+                    "Tente fazer login novamente."
+                )
+
+            if not resp.ok:
+                log(f"  Portal endpoint {path_tpl}: HTTP {resp.status_code} — tentando próximo...")
+                continue
+
+            # Got a 2xx — parse and validate
+            batch, prox_nsu, fim = self._parse_dfe_response(resp, log)
+
+            # Accept this endpoint if it returned valid data OR an explicit empty queue
+            if not self._portal_dfe_path:
+                self._portal_dfe_path = path_tpl
+                log(f"  [Portal API endpoint descoberto: {path_tpl}]")
+
+            return batch, prox_nsu, fim
+
+        # All candidates exhausted
+        raise RuntimeError(
+            "Nenhum endpoint da API do portal NFS-e respondeu corretamente. "
+            f"Último status: HTTP {last_status}. Corpo: {last_body!r}\n"
+            "Entre em contato para atualização do endpoint, ou use o Certificado Digital A1."
+        )
+
     def _buscar_dfe_batch(
         self, nsu: int, log: Callable[[str], None]
     ) -> Tuple[List[Tuple[str, str]], int, bool]:
         """
-        Call GET /contribuintes/DFe/{nsu}.
+        Call the DFe distribution endpoint.
+        - mTLS auth  → adn.nfse.gov.br/contribuintes/DFe/{nsu}
+        - Bearer auth → portal backend API (endpoint auto-discovered)
         Returns (batch, prox_nsu, fim_da_fila).
         """
+        if self._use_portal_api:
+            return self._buscar_dfe_batch_portal(nsu, log)
         url = f"{self.base_url}/DFe/{nsu}"
         retry = 0
         resp = None
@@ -214,15 +320,6 @@ class NfseNacionalClient:
 
         if resp.status_code in (404, 204):
             return [], nsu, True
-
-        if resp.status_code in (401, 403):
-            log(f"  ⚠ Erro {resp.status_code} (não autorizado): {resp.text[:300]}")
-            log("  ⚠ O token de autenticação foi rejeitado pela API de distribuição.")
-            raise RuntimeError(
-                f"Autenticação rejeitada pela API NFS-e (HTTP {resp.status_code}). "
-                "O token de login/senha não é aceito pela API de distribuição de documentos. "
-                "Use o Certificado Digital A1 para baixar NFS-e."
-            )
 
         if not resp.ok:
             log(f"  Erro HTTP {resp.status_code}: {resp.text[:300]}")

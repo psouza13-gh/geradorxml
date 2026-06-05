@@ -287,7 +287,7 @@ def download():
                 log=messages.append, nsu_inicial=nsu_ini,
             )
         except RuntimeError as e:
-            return jsonify({"error": str(e), "log": messages}), 401
+            return jsonify({"error": str(e), "log": messages}), 400
 
         if not results:
             return jsonify({

@@ -2,25 +2,25 @@
 Authentication via CPF/CNPJ + senha for the Sistema Nacional NFS-e portal.
 Portal: https://www.nfse.gov.br/EmissorNacional/Login
 
-Discovered flow (by inspecting the portal HTML/JS):
-  1. GET /EmissorNacional/Login
-       → extracts __RequestVerificationToken (ASP.NET anti-forgery)
-  2. POST /EmissorNacional/Login
-       fields: Inscricao=<CPF/CNPJ>, Senha=<senha>, __RequestVerificationToken
-       → server sets auth session cookie, redirects to dashboard
-  3. GET /EmissorNacional/Account/ObterToken  (with session cookie)
-       → returns the Bearer token used by the portal JS (sessionStorage["accessToken"])
-  4. Use token in Authorization: Bearer <token> for adn.nfse.gov.br API calls
+Discovered by live inspection of the portal HTML/JS:
+  Form fields  : Inscricao (CPF/CNPJ), Senha, __RequestVerificationToken (CSRF)
+  Form action  : POST https://www.nfse.gov.br/EmissorNacional/Login
+  Token endpoint (confirmed live): /EmissorNacional/Account/ObterToken  → HTTP 500 w/o session
+
+Token acquisition strategies (tried in order):
+  1. Inline JS in the post-login redirect page (window.accessToken / setItem)
+  2. GET /EmissorNacional/Account/ObterToken  with session cookie
+  3. POST /EmissorNacional/Account/ObterToken with session cookie
+  4. Raw JWT pattern search in any response body
 """
 
 import re
-import json
 import requests
 from typing import Callable
 
-PORTAL_BASE  = "https://www.nfse.gov.br"
-LOGIN_URL    = f"{PORTAL_BASE}/EmissorNacional/Login"
-TOKEN_URL    = f"{PORTAL_BASE}/EmissorNacional/Account/ObterToken"
+PORTAL_BASE = "https://www.nfse.gov.br"
+LOGIN_URL   = f"{PORTAL_BASE}/EmissorNacional/Login"
+TOKEN_URL   = f"{PORTAL_BASE}/EmissorNacional/Account/ObterToken"
 
 _UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -35,23 +35,12 @@ def autenticar_login(
     log: Callable[[str], None] = print,
 ) -> requests.Session:
     """
-    Authenticate with the NFS-e portal using CPF/CNPJ + senha.
+    Authenticate with the NFS-e portal using CPF/CNPJ (Inscricao) + senha.
 
-    Parameters
-    ----------
-    inscricao : CPF (11 digits) or CNPJ (14 digits), with or without
-                formatting (dots/slashes/dashes are stripped automatically).
-    senha     : portal password.
-    log       : logging callback.
+    Returns a requests.Session with Authorization: Bearer header set,
+    ready to call the NFS-e distribution API.
 
-    Returns
-    -------
-    requests.Session with Authorization: Bearer header set, ready to call
-    the NFS-e distribution API (adn.nfse.gov.br).
-
-    Raises
-    ------
-    RuntimeError with a descriptive Portuguese message on failure.
+    Raises RuntimeError with a descriptive Portuguese message on failure.
     """
     session = requests.Session()
     session.headers.update({
@@ -63,8 +52,7 @@ def autenticar_login(
     log("  Acessando portal NFS-e...")
     try:
         resp = session.get(
-            LOGIN_URL,
-            timeout=30,
+            LOGIN_URL, timeout=30,
             headers={"Accept": "text/html,application/xhtml+xml,*/*;q=0.8"},
         )
         resp.raise_for_status()
@@ -74,69 +62,148 @@ def autenticar_login(
     csrf = _extract_csrf(resp.text)
     if not csrf:
         raise RuntimeError(
-            "Token CSRF não encontrado na página de login do portal NFS-e. "
+            "Token CSRF não encontrado na página de login. "
             "O portal pode estar temporariamente indisponível."
         )
 
     # ── Step 2: POST credentials ──────────────────────────────────────────────
     log("  Enviando credenciais...")
-    payload = {
-        "__RequestVerificationToken": csrf,
-        "Inscricao": inscricao,
-        "Senha": senha,
-    }
     try:
         resp = session.post(
             LOGIN_URL,
-            data=payload,
+            data={
+                "__RequestVerificationToken": csrf,
+                "Inscricao": inscricao,
+                "Senha":     senha,
+            },
             timeout=30,
             allow_redirects=True,
             headers={
-                "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+                "Accept":       "text/html,application/xhtml+xml,*/*;q=0.8",
                 "Content-Type": "application/x-www-form-urlencoded",
-                "Referer": LOGIN_URL,
+                "Referer":      LOGIN_URL,
             },
         )
     except requests.RequestException as e:
         raise RuntimeError(f"Erro ao enviar credenciais: {e}")
 
-    # Detect login failure (server returns the login page again with error msg)
+    # Detect login failure (server re-renders login page with error)
     if _is_login_page(resp.url, resp.text):
-        # Try to extract specific error from the page
-        msg = _extract_error_message(resp.text)
+        err = _extract_error_message(resp.text)
         raise RuntimeError(
-            f"Login inválido no portal NFS-e. {msg or 'Verifique o CPF/CNPJ e a senha.'}"
+            f"Login inválido no portal NFS-e. "
+            f"{err or 'Verifique o CPF/CNPJ e a senha.'}"
         )
 
-    # ── Step 3: GET Bearer token ──────────────────────────────────────────────
-    log("  Obtendo token de acesso...")
-    token = _get_bearer_token(session)
+    log("  Login aceito. Obtendo token de acesso...")
+
+    # ── Step 3: Multi-strategy token acquisition ──────────────────────────────
+    token, diag = _acquire_token(session, resp)
+
     if not token:
         raise RuntimeError(
-            "Autenticação realizada no portal, mas não foi possível obter o token "
-            "de acesso à API. Tente novamente ou use o Certificado Digital A1."
+            "Autenticação realizada no portal, mas não foi possível obter o "
+            "token de acesso à API NFS-e.\n\n"
+            f"Diagnóstico:\n{diag}"
         )
 
-    log("  Autenticado no portal NFS-e com sucesso.")
+    log("  Token obtido. Autenticado com sucesso.")
     session.headers.update({
-        "Accept": "application/json",
+        "Accept":        "application/json",
         "Authorization": f"Bearer {token}",
     })
     session.cert = None
     return session
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Token acquisition ─────────────────────────────────────────────────────────
+
+def _acquire_token(
+    session: requests.Session,
+    post_resp: requests.Response,
+) -> tuple[str | None, str]:
+    """
+    Try every known strategy to get the Bearer token after a successful login.
+    Returns (token, diagnostic_log).
+    """
+    diag_lines = []
+
+    # Strategy 1 — inline JS in the post-login page HTML
+    token = _token_from_html(post_resp.text)
+    if token:
+        diag_lines.append("✓ Token encontrado no HTML do dashboard.")
+        return token, "\n".join(diag_lines)
+    diag_lines.append("• HTML do dashboard: sem token embutido.")
+
+    # Strategy 2 — GET /Account/ObterToken
+    try:
+        r = session.get(
+            TOKEN_URL, timeout=20,
+            headers={"Accept": "application/json, text/plain, */*"},
+            allow_redirects=True,
+        )
+        diag_lines.append(
+            f"• GET ObterToken → HTTP {r.status_code} | "
+            f"Content-Type: {r.headers.get('Content-Type','?')} | "
+            f"Body(200): {r.text[:200]!r}"
+        )
+        if r.ok and not _is_login_page(r.url, r.text):
+            token = _token_from_response(r)
+            if token:
+                diag_lines.append("✓ Token obtido via GET ObterToken.")
+                return token, "\n".join(diag_lines)
+    except requests.RequestException as e:
+        diag_lines.append(f"• GET ObterToken erro: {e}")
+
+    # Strategy 3 — POST /Account/ObterToken
+    try:
+        r = session.post(
+            TOKEN_URL, timeout=20,
+            headers={"Accept": "application/json, text/plain, */*"},
+            allow_redirects=True,
+        )
+        diag_lines.append(
+            f"• POST ObterToken → HTTP {r.status_code} | "
+            f"Content-Type: {r.headers.get('Content-Type','?')} | "
+            f"Body(200): {r.text[:200]!r}"
+        )
+        if r.ok and not _is_login_page(r.url, r.text):
+            token = _token_from_response(r)
+            if token:
+                diag_lines.append("✓ Token obtido via POST ObterToken.")
+                return token, "\n".join(diag_lines)
+    except requests.RequestException as e:
+        diag_lines.append(f"• POST ObterToken erro: {e}")
+
+    # Strategy 4 — scrape the dashboard for any JWT in loaded scripts
+    try:
+        r = session.get(
+            f"{PORTAL_BASE}/EmissorNacional/",
+            timeout=20,
+            headers={"Accept": "text/html,*/*;q=0.8"},
+        )
+        if r.ok and not _is_login_page(r.url, r.text):
+            token = _token_from_html(r.text)
+            diag_lines.append(
+                f"• Dashboard HTML → HTTP {r.status_code} | token: {'sim' if token else 'não'}"
+            )
+            if token:
+                return token, "\n".join(diag_lines)
+    except requests.RequestException as e:
+        diag_lines.append(f"• Dashboard HTML erro: {e}")
+
+    return None, "\n".join(diag_lines)
+
+
+# ── Parsers / helpers ─────────────────────────────────────────────────────────
 
 def _extract_csrf(html: str) -> str | None:
-    """Extract __RequestVerificationToken from the login form."""
     m = re.search(
         r'<input[^>]+name=["\']__RequestVerificationToken["\'][^>]+value=["\']([^"\']+)["\']',
         html, re.I,
     )
     if m:
         return m.group(1)
-    # Alternative attribute order
     m = re.search(
         r'<input[^>]+value=["\']([^"\']+)["\'][^>]+name=["\']__RequestVerificationToken["\']',
         html, re.I,
@@ -145,82 +212,84 @@ def _extract_csrf(html: str) -> str | None:
 
 
 def _is_login_page(url: str, html: str) -> bool:
-    """Return True if the response looks like the login page (meaning login failed)."""
     if "EmissorNacional/Login" in url:
         return True
-    # Also detect if the body still contains the login form
-    if 'name="Inscricao"' in html or 'name="Senha"' in html:
+    if 'name="Inscricao"' in html or 'placeholder="CPF/CNPJ"' in html:
         return True
     return False
 
 
 def _extract_error_message(html: str) -> str:
-    """Try to extract a server-side validation error from the login page HTML."""
-    # ASP.NET MVC typically uses .validation-summary-errors or .field-validation-error
-    patterns = [
+    for pat in (
         r'<div[^>]+class=["\'][^"\']*validation-summary-errors[^"\']*["\'][^>]*>(.*?)</div>',
         r'<span[^>]+class=["\'][^"\']*field-validation-error[^"\']*["\'][^>]*>(.*?)</span>',
         r'<div[^>]+class=["\'][^"\']*alert[^"\']*["\'][^>]*>(.*?)</div>',
         r'<p[^>]+class=["\'][^"\']*text-danger[^"\']*["\'][^>]*>(.*?)</p>',
-    ]
-    for pat in patterns:
+    ):
         m = re.search(pat, html, re.I | re.DOTALL)
         if m:
-            # Strip inner tags
             text = re.sub(r'<[^>]+>', '', m.group(1)).strip()
             if text:
                 return text
     return ""
 
 
-def _get_bearer_token(session: requests.Session) -> str | None:
-    """
-    Call the portal's token endpoint (discovered by inspecting the portal JS)
-    and return the Bearer token string.
-    """
-    try:
-        resp = session.get(
-            TOKEN_URL,
-            timeout=20,
-            headers={"Accept": "application/json, text/plain, */*"},
-        )
-        if not resp.ok:
-            return None
+def _token_from_html(html: str) -> str | None:
+    """Search HTML/inline-JS for an embedded access token."""
+    patterns = [
+        # sessionStorage.setItem("accessToken","<token>")
+        r'setItem\s*\(\s*["\']accessToken["\'],\s*["\']([^"\']{20,})["\']',
+        # window.accessToken = "<token>"
+        r'window\.accessToken\s*=\s*["\']([^"\']{20,})["\']',
+        # "accessToken": "<token>"  (JSON blob in page)
+        r'"accessToken"\s*:\s*"([^"]{20,})"',
+        # "access_token": "<token>"
+        r'"access_token"\s*:\s*"([^"]{20,})"',
+        # any JWT (eyJ...) embedded in the page
+        r'["\']?(eyJ[A-Za-z0-9\-_]{10,}\.[A-Za-z0-9\-_]{10,}\.[A-Za-z0-9\-_]{10,})["\']?',
+    ]
+    for p in patterns:
+        m = re.search(p, html)
+        if m:
+            return m.group(1)
+    return None
 
-        # Try JSON response first
-        try:
-            data = resp.json()
-            # Various possible key names
+
+def _token_from_response(resp: requests.Response) -> str | None:
+    """Extract token from an HTTP response (JSON or plain text)."""
+    # Try JSON
+    try:
+        data = resp.json()
+        if isinstance(data, str) and len(data) > 20:
+            return data          # plain string response
+        if isinstance(data, dict):
             for k in ("access_token", "accessToken", "token", "Token",
-                      "jwt", "bearerToken", "BearerToken"):
-                v = data.get(k) if isinstance(data, dict) else None
+                      "jwt", "bearerToken", "BearerToken", "resultado"):
+                v = data.get(k)
                 if isinstance(v, str) and len(v) > 20:
                     return v
-            # Nested under "data" or "result"
-            for wrapper in ("data", "result", "payload"):
-                sub = data.get(wrapper) if isinstance(data, dict) else None
+            # Nested
+            for wrapper in ("data", "result", "payload", "dados"):
+                sub = data.get(wrapper)
                 if isinstance(sub, dict):
                     for k in ("access_token", "accessToken", "token"):
                         v = sub.get(k)
                         if isinstance(v, str) and len(v) > 20:
                             return v
-        except ValueError:
-            pass
-
-        # Plain-text response (some endpoints return the token as raw string)
-        text = resp.text.strip()
-        if len(text) > 20 and '\n' not in text and ' ' not in text:
-            return text
-
-        # JWT embedded anywhere in the response
-        m = re.search(
-            r'(eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+)',
-            resp.text,
-        )
-        if m:
-            return m.group(1)
-
-    except requests.RequestException:
+    except Exception:
         pass
+
+    # Plain text — if it's a compact string with no whitespace
+    text = resp.text.strip()
+    if 20 < len(text) < 2000 and ' ' not in text and '\n' not in text:
+        return text
+
+    # JWT pattern anywhere in body
+    m = re.search(
+        r'(eyJ[A-Za-z0-9\-_]{10,}\.[A-Za-z0-9\-_]{10,}\.[A-Za-z0-9\-_]{10,})',
+        resp.text,
+    )
+    if m:
+        return m.group(1)
 
     return None

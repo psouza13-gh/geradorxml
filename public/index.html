@@ -115,22 +115,25 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
             </svg>
-            Credenciais da conta Gov.br para acessar o portal nfse.gov.br
+            Credenciais de acesso ao portal
+            <a href="https://www.nfse.gov.br/EmissorNacional/Login" target="_blank"
+               class="underline hover:text-blue-200">nfse.gov.br</a>
           </div>
           <div>
-            <label class="label">CPF ou E-mail Gov.br <span class="text-red-400">*</span></label>
-            <input id="portal_login" name="portal_login" type="text"
-              placeholder="000.000.000-00 ou email@gov.br" class="input"
+            <label class="label">E-mail <span class="text-red-400">*</span></label>
+            <input id="portal_login" name="portal_login" type="email"
+              placeholder="email@empresa.com.br" class="input"
               autocomplete="username"/>
           </div>
           <div>
-            <label class="label">Senha Gov.br <span class="text-red-400">*</span></label>
+            <label class="label">Senha <span class="text-red-400">*</span></label>
             <input id="portal_senha" name="portal_senha" type="password"
               placeholder="••••••••" class="input"
               autocomplete="current-password"/>
           </div>
-          <p class="text-xs text-yellow-500/80">
-            ⚠️ Autenticação em dois fatores (2FA) deve estar desativada na conta Gov.br para este método funcionar.
+          <p class="text-xs text-gray-400">
+            As mesmas credenciais usadas para entrar em
+            <span class="text-gray-300">nfse.gov.br/EmissorNacional/Login</span>
           </p>
         </div>
       </div>

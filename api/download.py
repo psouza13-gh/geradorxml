@@ -244,7 +244,7 @@ def download():
                 return jsonify({"error": "Informe o login (CPF/e-mail) e a senha do portal Gov.br."}), 400
 
             try:
-                messages.append(f"  Autenticando via Gov.br ({portal_login[:3]}***) ...")
+                messages.append(f"  Autenticando no portal NFS-e ({portal_login[:4]}***) ...")
                 auth_session = autenticar_login(portal_login, portal_senha, log=messages.append)
             except RuntimeError as e:
                 return jsonify({"error": str(e), "log": messages}), 401

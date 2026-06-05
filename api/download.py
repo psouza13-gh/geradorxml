@@ -16,6 +16,7 @@ if ROOT not in sys.path:
 
 from app.services.cert_handler import export_to_pem_files, get_cert_info
 from app.services.nfse_nacional import NfseNacionalClient
+from app.services.nfse_login import autenticar_login
 from app.services import cert_handler as _ch
 
 app = Flask(__name__)
@@ -209,18 +210,15 @@ def build_xlsx(rows: list) -> bytes:
 
 @app.route("/api/download", methods=["POST"])
 def download():
-    cert_file = request.files.get("cert")
-    if not cert_file:
-        return jsonify({"error": "Arquivo de certificado (.pfx) não enviado."}), 400
-
-    password   = request.form.get("password", "")
-    cnpj       = "".join(c for c in request.form.get("cnpj", "") if c.isdigit())
-    nome       = request.form.get("nome", "Cliente")
-    data_ini_s = request.form.get("data_inicial", "")
-    data_fim_s = request.form.get("data_final", "")
-    ambiente   = request.form.get("ambiente", "producao")
-    nsu_ini    = int(request.form.get("nsu_inicial", 0) or 0)
-    tipo_nfse  = request.form.get("tipo_nfse", "todas")   # todas | emitidas | recebidas
+    # ── Common fields ──────────────────────────────────────────────────────────
+    auth_method = request.form.get("auth_method", "cert")   # "cert" | "login"
+    cnpj        = "".join(c for c in request.form.get("cnpj", "") if c.isdigit())
+    nome        = request.form.get("nome", "Cliente")
+    data_ini_s  = request.form.get("data_inicial", "")
+    data_fim_s  = request.form.get("data_final", "")
+    ambiente    = request.form.get("ambiente", "producao")
+    nsu_ini     = int(request.form.get("nsu_inicial", 0) or 0)
+    tipo_nfse   = request.form.get("tipo_nfse", "todas")
     if tipo_nfse not in ("todas", "emitidas", "recebidas"):
         tipo_nfse = "todas"
 
@@ -233,26 +231,56 @@ def download():
     except ValueError:
         return jsonify({"error": "Datas inválidas. Use AAAA-MM-DD."}), 400
 
-    # Save cert to temp file
-    tmp_cert = tempfile.NamedTemporaryFile(delete=False, suffix=".pfx", prefix="nfse_up_")
-    tmp_cert.write(cert_file.read())
-    tmp_cert.close()
+    tmp_cert_path = None
+    messages = []
 
     try:
-        # Validate cert
-        try:
-            info = get_cert_info(tmp_cert.name, password)
-            if info.get("vencido"):
-                return jsonify({"error": f"Certificado vencido em {info['validade']}."}), 400
-        except Exception as e:
-            return jsonify({"error": f"Certificado inválido ou senha incorreta: {e}"}), 400
+        # ── Authentication ─────────────────────────────────────────────────────
+        if auth_method == "login":
+            # Login e senha (Gov.br)
+            portal_login = request.form.get("portal_login", "").strip()
+            portal_senha = request.form.get("portal_senha", "")
+            if not portal_login or not portal_senha:
+                return jsonify({"error": "Informe o login (CPF/e-mail) e a senha do portal Gov.br."}), 400
 
-        # Download NFS-e
-        messages = []
-        client = NfseNacionalClient(
-            cnpj=cnpj, cert_path=tmp_cert.name,
-            cert_password=password, ambiente=ambiente,
-        )
+            try:
+                messages.append(f"  Autenticando via Gov.br ({portal_login[:3]}***) ...")
+                auth_session = autenticar_login(portal_login, portal_senha, log=messages.append)
+            except RuntimeError as e:
+                return jsonify({"error": str(e), "log": messages}), 401
+            except Exception as e:
+                return jsonify({"error": f"Falha na autenticação Gov.br: {e}", "log": messages}), 500
+
+            client = NfseNacionalClient(
+                cnpj=cnpj, ambiente=ambiente, session=auth_session,
+            )
+
+        else:
+            # Certificado Digital A1
+            cert_file = request.files.get("cert")
+            if not cert_file:
+                return jsonify({"error": "Arquivo de certificado (.pfx) não enviado."}), 400
+
+            password = request.form.get("password", "")
+
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pfx", prefix="nfse_up_")
+            tmp.write(cert_file.read())
+            tmp.close()
+            tmp_cert_path = tmp.name
+
+            try:
+                info = get_cert_info(tmp_cert_path, password)
+                if info.get("vencido"):
+                    return jsonify({"error": f"Certificado vencido em {info['validade']}."}), 400
+            except Exception as e:
+                return jsonify({"error": f"Certificado inválido ou senha incorreta: {e}"}), 400
+
+            client = NfseNacionalClient(
+                cnpj=cnpj, cert_path=tmp_cert_path,
+                cert_password=password, ambiente=ambiente,
+            )
+
+        # ── Download NFS-e ─────────────────────────────────────────────────────
         results = client.consultar_por_periodo(
             data_inicial=data_ini, data_final=data_fim,
             log=messages.append, nsu_inicial=nsu_ini,
@@ -331,10 +359,11 @@ def download():
                          as_attachment=True, download_name=zip_name)
 
     finally:
-        try:
-            os.unlink(tmp_cert.name)
-        except OSError:
-            pass
+        if tmp_cert_path:
+            try:
+                os.unlink(tmp_cert_path)
+            except OSError:
+                pass
         for f in list(_ch._temp_files):
             try:
                 os.unlink(f)

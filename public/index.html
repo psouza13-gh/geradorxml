@@ -77,15 +77,62 @@
         </div>
       </div>
 
+      <!-- Auth method selector -->
       <div>
-        <label class="label">Certificado Digital A1 (.pfx / .p12) <span class="text-red-400">*</span></label>
-        <input id="cert" name="cert" type="file" accept=".pfx,.p12" required class="input"/>
-        <p class="text-xs text-gray-500 mt-1">Usado apenas durante o download — não é armazenado no servidor.</p>
+        <label class="label mb-2 block">Método de Autenticação</label>
+        <div class="flex gap-2">
+          <label class="auth-btn active" id="auth-cert-btn">
+            <input type="radio" name="auth_method" value="cert" checked class="hidden"/>
+            <span>🔐 Certificado Digital A1</span>
+          </label>
+          <label class="auth-btn" id="auth-login-btn">
+            <input type="radio" name="auth_method" value="login" class="hidden"/>
+            <span>🔑 Login e Senha</span>
+          </label>
+        </div>
       </div>
 
-      <div>
-        <label class="label">Senha do Certificado <span class="text-red-400">*</span></label>
-        <input id="password" name="password" type="password" placeholder="••••••••" required class="input"/>
+      <!-- CERT fields -->
+      <div id="auth-cert-fields">
+        <div class="space-y-4">
+          <div>
+            <label class="label">Certificado Digital A1 (.pfx / .p12) <span class="text-red-400">*</span></label>
+            <input id="cert" name="cert" type="file" accept=".pfx,.p12" class="input"/>
+            <p class="text-xs text-gray-500 mt-1">Usado apenas durante o download — não é armazenado no servidor.</p>
+          </div>
+          <div>
+            <label class="label">Senha do Certificado <span class="text-red-400">*</span></label>
+            <input id="password" name="password" type="password" placeholder="••••••••" class="input"/>
+          </div>
+        </div>
+      </div>
+
+      <!-- LOGIN fields -->
+      <div id="auth-login-fields" class="hidden">
+        <div class="bg-blue-950/30 border border-blue-800/40 rounded-xl p-4 space-y-3">
+          <div class="flex items-center gap-2 text-xs text-blue-300 mb-1">
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            Credenciais da conta Gov.br para acessar o portal nfse.gov.br
+          </div>
+          <div>
+            <label class="label">CPF ou E-mail Gov.br <span class="text-red-400">*</span></label>
+            <input id="portal_login" name="portal_login" type="text"
+              placeholder="000.000.000-00 ou email@gov.br" class="input"
+              autocomplete="username"/>
+          </div>
+          <div>
+            <label class="label">Senha Gov.br <span class="text-red-400">*</span></label>
+            <input id="portal_senha" name="portal_senha" type="password"
+              placeholder="••••••••" class="input"
+              autocomplete="current-password"/>
+          </div>
+          <p class="text-xs text-yellow-500/80">
+            ⚠️ Autenticação em dois fatores (2FA) deve estar desativada na conta Gov.br para este método funcionar.
+          </p>
+        </div>
       </div>
 
       <!-- Tipo de NFS-e -->
@@ -259,15 +306,16 @@
                    padding:.75rem 1rem;cursor:pointer;transition:.15s }
   .client-card:hover { border-color:#3b82f6 }
   .client-card.selected { border-color:#3b82f6;background:#1e3a5f }
-  /* Tipo radio buttons */
-  .tipo-btn {
+  /* Auth + Tipo radio buttons — shared style */
+  .auth-btn, .tipo-btn {
     display:inline-flex;align-items:center;gap:.35rem;
     cursor:pointer;padding:.4rem 1rem;border-radius:.6rem;font-size:.8rem;font-weight:500;
     background:#1f2937;border:1px solid #374151;color:#9ca3af;transition:all .15s;
     user-select:none;
   }
-  .tipo-btn:hover { border-color:#4b5563;color:#e5e7eb; }
+  .auth-btn:hover, .tipo-btn:hover { border-color:#4b5563;color:#e5e7eb; }
   .tipo-btn.active { background:#1e3a5f;border-color:#3b82f6;color:#93c5fd; }
+  .auth-btn.active { background:#14532d;border-color:#16a34a;color:#86efac; }
 </style>
 
 <script>
@@ -307,6 +355,41 @@ function setPeriod(p) {
   else { ini='2023-01-01'; fim=new Date(y,11,31).toISOString().slice(0,10); }
   $('data_inicial').value=ini; $('data_final').value=fim;
 }
+
+// ── Auth method toggle ─────────────────────────────────────────────────────────
+(function setupAuth() {
+  const certBtn  = $('auth-cert-btn');
+  const loginBtn = $('auth-login-btn');
+  const certF    = $('auth-cert-fields');
+  const loginF   = $('auth-login-fields');
+  const certFile = $('cert');
+  const certPwd  = $('password');
+  const plLogin  = $('portal_login');
+  const plSenha  = $('portal_senha');
+
+  function setAuthMode(mode) {
+    const isCert = mode === 'cert';
+    certBtn.classList.toggle('active', isCert);
+    loginBtn.classList.toggle('active', !isCert);
+    certBtn.querySelector('input').checked = isCert;
+    loginBtn.querySelector('input').checked = !isCert;
+
+    certF.classList.toggle('hidden', !isCert);
+    loginF.classList.toggle('hidden', isCert);
+
+    // required attributes — only validate visible fields
+    certFile.required = isCert;
+    certPwd.required  = isCert;
+    plLogin.required  = !isCert;
+    plSenha.required  = !isCert;
+  }
+
+  certBtn.addEventListener('click',  () => setAuthMode('cert'));
+  loginBtn.addEventListener('click', () => setAuthMode('login'));
+
+  // Init
+  setAuthMode('cert');
+})();
 
 // ── Tipo radio buttons ─────────────────────────────────────────────────────────
 (function setupTipo() {

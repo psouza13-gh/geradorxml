@@ -27,17 +27,39 @@ MAX_ITERATIONS = 500   # safety cap (~25.000 notas)
 
 
 class NfseNacionalClient:
-    def __init__(self, cnpj: str, cert_path: str, cert_password: str, ambiente: str = "producao"):
+    def __init__(
+        self,
+        cnpj: str,
+        cert_path: str | None = None,
+        cert_password: str | None = None,
+        ambiente: str = "producao",
+        session: "requests.Session | None" = None,
+    ):
+        """
+        Parameters
+        ----------
+        cnpj          : CNPJ do contribuinte (apenas dígitos).
+        cert_path     : Caminho para o arquivo .pfx/.p12 (auth por certificado).
+        cert_password : Senha do certificado.
+        ambiente      : "producao" ou "homologacao".
+        session       : Sessão já autenticada (ex.: via Gov.br login).
+                        Quando fornecida, cert_path/cert_password são ignorados.
+        """
         self.cnpj = _only_digits(cnpj)
         self.cert_path = cert_path
         self.cert_password = cert_password
         self.base_url = BASE_URL_PROD if ambiente == "producao" else BASE_URL_TEST
-        self._session: requests.Session | None = None
+        self._session: requests.Session | None = session  # may be pre-authenticated
 
     # ─── Session ──────────────────────────────────────────────────────────
 
     def _get_session(self) -> requests.Session:
         if self._session is None:
+            if not self.cert_path:
+                raise RuntimeError(
+                    "Nenhum método de autenticação configurado. "
+                    "Forneça cert_path ou uma session já autenticada."
+                )
             cert_pem, key_pem = export_to_pem_files(self.cert_path, self.cert_password)
             session = requests.Session()
             session.cert = (cert_pem, key_pem)

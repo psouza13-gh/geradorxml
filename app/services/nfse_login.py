@@ -1,35 +1,26 @@
 """
-Authentication via e-mail + password for the Sistema Nacional NFS-e portal.
-Portal URL: https://www.nfse.gov.br/EmissorNacional/Login
+Authentication via CPF/CNPJ + senha for the Sistema Nacional NFS-e portal.
+Portal: https://www.nfse.gov.br/EmissorNacional/Login
 
-Flow:
-  1. GET the login page → extract CSRF token / form details
-  2. POST credentials (email + senha)
-  3. Capture the Bearer token from the response (cookie, JSON body, or embedded JS)
-  4. Return a requests.Session ready to call adn.nfse.gov.br
-
-If authentication fails for any reason, raises RuntimeError with a
-user-friendly Portuguese message.
+Discovered flow (by inspecting the portal HTML/JS):
+  1. GET /EmissorNacional/Login
+       → extracts __RequestVerificationToken (ASP.NET anti-forgery)
+  2. POST /EmissorNacional/Login
+       fields: Inscricao=<CPF/CNPJ>, Senha=<senha>, __RequestVerificationToken
+       → server sets auth session cookie, redirects to dashboard
+  3. GET /EmissorNacional/Account/ObterToken  (with session cookie)
+       → returns the Bearer token used by the portal JS (sessionStorage["accessToken"])
+  4. Use token in Authorization: Bearer <token> for adn.nfse.gov.br API calls
 """
 
 import re
 import json
 import requests
-from html.parser import HTMLParser
 from typing import Callable
 
-PORTAL_BASE   = "https://www.nfse.gov.br"
-PORTAL_LOGIN  = f"{PORTAL_BASE}/EmissorNacional/Login"
-
-# Candidate REST endpoints that SPAs commonly use for token-based login
-_API_LOGIN_CANDIDATES = [
-    "/EmissorNacional/api/auth/login",
-    "/EmissorNacional/api/autenticacao/login",
-    "/EmissorNacional/api/usuario/login",
-    "/EmissorNacional/api/login",
-    "/api/auth/login",
-    "/api/login",
-]
+PORTAL_BASE  = "https://www.nfse.gov.br"
+LOGIN_URL    = f"{PORTAL_BASE}/EmissorNacional/Login"
+TOKEN_URL    = f"{PORTAL_BASE}/EmissorNacional/Account/ObterToken"
 
 _UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -38,77 +29,92 @@ _UA = (
 )
 
 
-# ── Minimal HTML form extractor ───────────────────────────────────────────────
-
-class _FormParser(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.forms: list[dict] = []
-        self._cur: dict | None = None
-
-    def handle_starttag(self, tag, attrs):
-        a = dict(attrs)
-        if tag == "form":
-            self._cur = {"action": a.get("action", ""), "fields": {}}
-        elif tag == "input" and self._cur is not None:
-            name = a.get("name")
-            if name:
-                self._cur["fields"][name] = a.get("value", "")
-
-    def handle_endtag(self, tag):
-        if tag == "form" and self._cur is not None:
-            self.forms.append(self._cur)
-            self._cur = None
-
-
-def _abs(base: str, href: str) -> str:
-    if href.startswith("http"):
-        return href
-    if href.startswith("/"):
-        from urllib.parse import urlparse
-        p = urlparse(base)
-        return f"{p.scheme}://{p.netloc}{href}"
-    return base.rstrip("/") + "/" + href
-
-
-# ── Main authentication function ──────────────────────────────────────────────
-
 def autenticar_login(
-    email: str,
+    inscricao: str,
     senha: str,
     log: Callable[[str], None] = print,
 ) -> requests.Session:
     """
-    Authenticate with the NFS-e portal (nfse.gov.br) using e-mail + senha.
+    Authenticate with the NFS-e portal using CPF/CNPJ + senha.
 
-    Returns a requests.Session with the Bearer token set in
-    the Authorization header, ready to call the NFS-e distribution API.
+    Parameters
+    ----------
+    inscricao : CPF (11 digits) or CNPJ (14 digits), with or without
+                formatting (dots/slashes/dashes are stripped automatically).
+    senha     : portal password.
+    log       : logging callback.
 
-    Raises RuntimeError with a descriptive message on failure.
+    Returns
+    -------
+    requests.Session with Authorization: Bearer header set, ready to call
+    the NFS-e distribution API (adn.nfse.gov.br).
+
+    Raises
+    ------
+    RuntimeError with a descriptive Portuguese message on failure.
     """
     session = requests.Session()
     session.headers.update({
         "User-Agent": _UA,
-        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
         "Accept-Language": "pt-BR,pt;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Origin": PORTAL_BASE,
-        "Referer": PORTAL_LOGIN,
     })
 
-    # ── Strategy A: JSON API login (modern SPA pattern) ───────────────────────
-    log("  Autenticando no portal NFS-e...")
-    token = _try_api_login(session, email, senha, log)
+    # ── Step 1: GET login page → extract CSRF token ───────────────────────────
+    log("  Acessando portal NFS-e...")
+    try:
+        resp = session.get(
+            LOGIN_URL,
+            timeout=30,
+            headers={"Accept": "text/html,application/xhtml+xml,*/*;q=0.8"},
+        )
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        raise RuntimeError(f"Não foi possível acessar o portal NFS-e: {e}")
 
-    # ── Strategy B: HTML form login (fallback) ────────────────────────────────
-    if not token:
-        token = _try_form_login(session, email, senha, log)
+    csrf = _extract_csrf(resp.text)
+    if not csrf:
+        raise RuntimeError(
+            "Token CSRF não encontrado na página de login do portal NFS-e. "
+            "O portal pode estar temporariamente indisponível."
+        )
 
+    # ── Step 2: POST credentials ──────────────────────────────────────────────
+    log("  Enviando credenciais...")
+    payload = {
+        "__RequestVerificationToken": csrf,
+        "Inscricao": inscricao,
+        "Senha": senha,
+    }
+    try:
+        resp = session.post(
+            LOGIN_URL,
+            data=payload,
+            timeout=30,
+            allow_redirects=True,
+            headers={
+                "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Referer": LOGIN_URL,
+            },
+        )
+    except requests.RequestException as e:
+        raise RuntimeError(f"Erro ao enviar credenciais: {e}")
+
+    # Detect login failure (server returns the login page again with error msg)
+    if _is_login_page(resp.url, resp.text):
+        # Try to extract specific error from the page
+        msg = _extract_error_message(resp.text)
+        raise RuntimeError(
+            f"Login inválido no portal NFS-e. {msg or 'Verifique o CPF/CNPJ e a senha.'}"
+        )
+
+    # ── Step 3: GET Bearer token ──────────────────────────────────────────────
+    log("  Obtendo token de acesso...")
+    token = _get_bearer_token(session)
     if not token:
         raise RuntimeError(
-            "Não foi possível autenticar no portal NFS-e com as credenciais fornecidas.\n"
-            "Verifique o e-mail e a senha e tente novamente.\n"
-            "Se o portal exigir autenticação em dois fatores, use o Certificado Digital A1."
+            "Autenticação realizada no portal, mas não foi possível obter o token "
+            "de acesso à API. Tente novamente ou use o Certificado Digital A1."
         )
 
     log("  Autenticado no portal NFS-e com sucesso.")
@@ -120,185 +126,101 @@ def autenticar_login(
     return session
 
 
-# ── Strategy A: direct JSON API ───────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _try_api_login(
-    session: requests.Session,
-    email: str,
-    senha: str,
-    log: Callable,
-) -> str | None:
-    """Try common JSON API login endpoints used by SPAs."""
-    payloads = [
-        {"email": email, "senha": senha},
-        {"email": email, "password": senha},
-        {"login": email, "senha": senha},
-        {"login": email, "password": senha},
-        {"username": email, "password": senha},
+def _extract_csrf(html: str) -> str | None:
+    """Extract __RequestVerificationToken from the login form."""
+    m = re.search(
+        r'<input[^>]+name=["\']__RequestVerificationToken["\'][^>]+value=["\']([^"\']+)["\']',
+        html, re.I,
+    )
+    if m:
+        return m.group(1)
+    # Alternative attribute order
+    m = re.search(
+        r'<input[^>]+value=["\']([^"\']+)["\'][^>]+name=["\']__RequestVerificationToken["\']',
+        html, re.I,
+    )
+    return m.group(1) if m else None
+
+
+def _is_login_page(url: str, html: str) -> bool:
+    """Return True if the response looks like the login page (meaning login failed)."""
+    if "EmissorNacional/Login" in url:
+        return True
+    # Also detect if the body still contains the login form
+    if 'name="Inscricao"' in html or 'name="Senha"' in html:
+        return True
+    return False
+
+
+def _extract_error_message(html: str) -> str:
+    """Try to extract a server-side validation error from the login page HTML."""
+    # ASP.NET MVC typically uses .validation-summary-errors or .field-validation-error
+    patterns = [
+        r'<div[^>]+class=["\'][^"\']*validation-summary-errors[^"\']*["\'][^>]*>(.*?)</div>',
+        r'<span[^>]+class=["\'][^"\']*field-validation-error[^"\']*["\'][^>]*>(.*?)</span>',
+        r'<div[^>]+class=["\'][^"\']*alert[^"\']*["\'][^>]*>(.*?)</div>',
+        r'<p[^>]+class=["\'][^"\']*text-danger[^"\']*["\'][^>]*>(.*?)</p>',
     ]
-
-    for path in _API_LOGIN_CANDIDATES:
-        url = PORTAL_BASE + path
-        for payload in payloads:
-            try:
-                resp = session.post(
-                    url,
-                    json=payload,
-                    timeout=20,
-                    headers={
-                        "Accept": "application/json",
-                        "Content-Type": "application/json",
-                    },
-                )
-                if resp.status_code in (200, 201):
-                    token = _extract_token_from_json(resp)
-                    if token:
-                        return token
-                elif resp.status_code in (401, 403):
-                    # Server responded — endpoint exists but creds wrong or
-                    # payload format mismatch; try next payload
-                    body = _safe_json(resp)
-                    msg = (body.get("message") or body.get("erro") or
-                           body.get("error") or "")
-                    if msg and any(s in msg.lower() for s in
-                                   ("senha", "usuário", "inválid", "incorret", "credencial")):
-                        raise RuntimeError(
-                            f"E-mail ou senha incorretos no portal NFS-e: {msg}"
-                        )
-            except RuntimeError:
-                raise
-            except requests.RequestException:
-                continue
-
-    return None
+    for pat in patterns:
+        m = re.search(pat, html, re.I | re.DOTALL)
+        if m:
+            # Strip inner tags
+            text = re.sub(r'<[^>]+>', '', m.group(1)).strip()
+            if text:
+                return text
+    return ""
 
 
-# ── Strategy B: HTML form login ───────────────────────────────────────────────
-
-def _try_form_login(
-    session: requests.Session,
-    email: str,
-    senha: str,
-    log: Callable,
-) -> str | None:
-    """Fall back to HTML form submission."""
+def _get_bearer_token(session: requests.Session) -> str | None:
+    """
+    Call the portal's token endpoint (discovered by inspecting the portal JS)
+    and return the Bearer token string.
+    """
     try:
-        resp = session.get(PORTAL_LOGIN, timeout=30, allow_redirects=True)
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        raise RuntimeError(f"Não foi possível acessar o portal NFS-e: {e}")
-
-    # Parse form
-    parser = _FormParser()
-    parser.feed(resp.text)
-
-    login_form = None
-    for form in parser.forms:
-        keys = set(form["fields"])
-        if any(k in keys for k in ("email", "login", "username", "j_username")):
-            login_form = form
-            break
-    if not login_form:
-        for form in parser.forms:
-            if any(k in set(form["fields"]) for k in ("senha", "password", "j_password")):
-                login_form = form
-                break
-
-    if not login_form:
-        return None
-
-    # Fill form
-    fields = login_form["fields"].copy()
-    for k in ("email", "login", "username", "j_username"):
-        if k in fields:
-            fields[k] = email
-            break
-    for k in ("senha", "password", "j_password", "pass"):
-        if k in fields:
-            fields[k] = senha
-            break
-
-    action = _abs(resp.url, login_form["action"] or resp.url)
-
-    try:
-        resp2 = session.post(
-            action,
-            data=fields,
-            timeout=30,
-            allow_redirects=True,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        resp = session.get(
+            TOKEN_URL,
+            timeout=20,
+            headers={"Accept": "application/json, text/plain, */*"},
         )
-    except requests.RequestException as e:
-        raise RuntimeError(f"Erro ao enviar credenciais: {e}")
+        if not resp.ok:
+            return None
 
-    # Check for wrong password indicators
-    low = resp2.text.lower()
-    if any(s in low for s in ("senha incorreta", "usuário não encontrado",
-                               "credenciais inválidas", "login inválido")):
-        raise RuntimeError("E-mail ou senha incorretos no portal NFS-e.")
-
-    # Try to extract token from the response
-    token = _extract_token_from_response(session, resp2)
-    return token
-
-
-# ── Token extraction helpers ─────────────────────────────────────────────────
-
-def _extract_token_from_json(resp: requests.Response) -> str | None:
-    data = _safe_json(resp)
-    for k in ("access_token", "accessToken", "token", "id_token",
-               "idToken", "jwt", "bearerToken"):
-        v = data.get(k)
-        if isinstance(v, str) and len(v) > 20:
-            return v
-    # Nested: data.token, data.data.access_token …
-    for nested_key in ("data", "result", "payload"):
-        sub = data.get(nested_key)
-        if isinstance(sub, dict):
-            for k in ("access_token", "accessToken", "token", "jwt"):
-                v = sub.get(k)
+        # Try JSON response first
+        try:
+            data = resp.json()
+            # Various possible key names
+            for k in ("access_token", "accessToken", "token", "Token",
+                      "jwt", "bearerToken", "BearerToken"):
+                v = data.get(k) if isinstance(data, dict) else None
                 if isinstance(v, str) and len(v) > 20:
                     return v
-    return None
+            # Nested under "data" or "result"
+            for wrapper in ("data", "result", "payload"):
+                sub = data.get(wrapper) if isinstance(data, dict) else None
+                if isinstance(sub, dict):
+                    for k in ("access_token", "accessToken", "token"):
+                        v = sub.get(k)
+                        if isinstance(v, str) and len(v) > 20:
+                            return v
+        except ValueError:
+            pass
 
+        # Plain-text response (some endpoints return the token as raw string)
+        text = resp.text.strip()
+        if len(text) > 20 and '\n' not in text and ' ' not in text:
+            return text
 
-def _extract_token_from_response(
-    session: requests.Session,
-    resp: requests.Response,
-) -> str | None:
-    # 1. JSON body
-    token = _extract_token_from_json(resp)
-    if token:
-        return token
+        # JWT embedded anywhere in the response
+        m = re.search(
+            r'(eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+)',
+            resp.text,
+        )
+        if m:
+            return m.group(1)
 
-    # 2. HttpOnly cookie with token-like name
-    for cookie in session.cookies:
-        if cookie.name.lower() in ("access_token", "jwt", "token",
-                                    "id_token", "auth_token", "bearer"):
-            return cookie.value
-
-    # 3. JWT pattern embedded in HTML/JS
-    m = re.search(
-        r'(?:access_token|token|jwt)\s*[=:]\s*["\']'
-        r'(eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+)["\']',
-        resp.text,
-    )
-    if m:
-        return m.group(1)
-
-    # 4. Any bearer-looking string in JSON-like script tags
-    m = re.search(
-        r'"(?:access_token|token|bearerToken)"\s*:\s*"([A-Za-z0-9\-_.+/]{40,})"',
-        resp.text,
-    )
-    if m:
-        return m.group(1)
+    except requests.RequestException:
+        pass
 
     return None
-
-
-def _safe_json(resp: requests.Response) -> dict:
-    try:
-        return resp.json()
-    except Exception:
-        return {}

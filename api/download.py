@@ -25,6 +25,9 @@ app = Flask(__name__)
 
 NS = "http://www.sped.fazenda.gov.br/nfse"
 
+_digits = lambda s: "".join(c for c in s if c.isdigit())
+
+
 def _txt(root, *tags) -> str:
     """Find first matching tag (with or without namespace) and return its text."""
     for tag in tags:
@@ -35,10 +38,11 @@ def _txt(root, *tags) -> str:
     return ""
 
 
-def parse_nfse(chave: str, nsu: int, xml: str) -> dict:
+def parse_nfse(chave: str, nsu: int, xml: str, cnpj_contribuinte: str = "") -> dict:
     row = {
         "ChaveAcesso": chave,
         "NSU": nsu,
+        "Tipo": "Indefinida",   # Emitida / Recebida / Indefinida
         "NumeroNFSe": "",
         "DataEmissao": "",
         "Competencia": "",
@@ -57,22 +61,59 @@ def parse_nfse(chave: str, nsu: int, xml: str) -> dict:
         row["NumeroNFSe"]          = _txt(root, "nNFSe")
         row["DataEmissao"]         = _txt(root, "dhEmi", "dEmi", "DataEmissao")[:10]
         row["Competencia"]         = _txt(root, "dComp", "competencia", "Competencia")[:10]
-        row["CNPJPrestador"]       = _txt(root, "emit//CNPJ", "prestador//CNPJ", "CNPJ")
-        row["NomePrestador"]       = _txt(root, "emit//xNome", "prestador//xNome", "xNome")
-        row["CNPJTomador"]         = _txt(root, "tomador//CNPJ")
-        row["NomeTomador"]         = _txt(root, "tomador//xNome")
-        row["DescricaoServico"]    = _txt(root, "xDescServ", "descricao")
+        row["CNPJPrestador"]       = _txt(root, "emit//CNPJ", "prestador//CNPJ",
+                                          "prest//CNPJ", "Prestador//CNPJ")
+        row["NomePrestador"]       = _txt(root, "emit//xNome", "prestador//xNome",
+                                          "prest//xNome", "xNome")
+        row["CNPJTomador"]         = _txt(root, "tomador//CNPJ", "dest//CNPJ",
+                                          "Tomador//CNPJ")
+        row["NomeTomador"]         = _txt(root, "tomador//xNome", "dest//xNome")
+        row["DescricaoServico"]    = _txt(root, "xDescServ", "descricao", "Descricao")
         row["ValorServico"]        = _txt(root, "vServ", "vServPrest//vReceb", "ValorServicos")
         row["ValorISSQN"]          = _txt(root, "vISSQN", "vIss", "ValorIss")
         row["Aliquota"]            = _txt(root, "pAliq", "aliquota", "Aliquota")
         row["MunicipioIncidencia"] = _txt(root, "cLocIncid", "cMunFG", "CodigoMunicipio")
 
-        # Fallback: CNPJ do prestador pode estar no topo do XML (emit ou infDPS/emit)
+        # Fallback: CNPJ do prestador pode estar no topo do XML
         if not row["CNPJPrestador"]:
             row["CNPJPrestador"] = _txt(root, "CNPJ")
     except ET.ParseError:
         pass
+
+    # ── Classify: Emitida / Recebida / Indefinida ─────────────────────────
+    if cnpj_contribuinte:
+        cnpj_d  = _digits(cnpj_contribuinte)
+        prest_d = _digits(row["CNPJPrestador"])
+        tom_d   = _digits(row["CNPJTomador"])
+        if prest_d and prest_d == cnpj_d:
+            row["Tipo"] = "Emitida"
+        elif tom_d and tom_d == cnpj_d:
+            row["Tipo"] = "Recebida"
+        # else: stays "Indefinida" — CNPJ not found in XML; kept in both filters
+
     return row
+
+
+def _filter_by_tipo(results: list, xlsx_rows: list, tipo: str) -> tuple:
+    """
+    Filter results and xlsx_rows by NFS-e type without losing notes:
+    • "todas"    → keep everything
+    • "emitidas" → Emitida + Indefinida  (Indefinida kept so nothing is lost)
+    • "recebidas"→ Recebida + Indefinida
+    """
+    if tipo == "todas":
+        return results, xlsx_rows
+
+    keep = {
+        "emitidas":  {"Emitida",  "Indefinida"},
+        "recebidas": {"Recebida", "Indefinida"},
+    }.get(tipo, {"Emitida", "Recebida", "Indefinida"})
+
+    paired = [(r, row) for r, row in zip(results, xlsx_rows) if row["Tipo"] in keep]
+    if not paired:
+        return [], []
+    res, rows = zip(*paired)
+    return list(res), list(rows)
 
 
 # ── XLSX builder ─────────────────────────────────────────────────────────────
@@ -80,6 +121,7 @@ def parse_nfse(chave: str, nsu: int, xml: str) -> dict:
 COLUNAS = [
     ("ChaveAcesso",        "Chave de Acesso",          50),
     ("NSU",                "NSU",                       8),
+    ("Tipo",               "Tipo",                     12),  # Emitida / Recebida / Indefinida
     ("NumeroNFSe",         "Número NFS-e",             14),
     ("DataEmissao",        "Data Emissão",             14),
     ("Competencia",        "Competência",              14),
@@ -124,16 +166,28 @@ def build_xlsx(rows: list) -> bytes:
     ws.row_dimensions[1].height = 30
     ws.freeze_panes = "A2"
 
+    # Fills for "Tipo" column
+    tipo_fills = {
+        "Emitida":   PatternFill("solid", fgColor="D4EDDA"),  # light green
+        "Recebida":  PatternFill("solid", fgColor="D1ECF1"),  # light blue
+        "Indefinida":PatternFill("solid", fgColor="FFF3CD"),  # light yellow
+    }
+
     # Data rows
     for r, row in enumerate(rows, 2):
-        fill = alt_fill if r % 2 == 0 else None
+        alt = r % 2 == 0
         for col, (key, _, _) in enumerate(COLUNAS, 1):
             val = row.get(key, "")
             cell = ws.cell(row=r, column=col, value=val)
             cell.border = thin_border
             cell.alignment = Alignment(vertical="center")
-            if fill:
-                cell.fill = fill
+            if key == "Tipo":
+                # Always apply tipo color regardless of alternating row
+                cell.fill = tipo_fills.get(val, alt_fill if alt else PatternFill())
+                cell.font = Font(bold=True, size=10)
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            elif alt:
+                cell.fill = alt_fill
 
     # Auto-filter
     ws.auto_filter.ref = ws.dimensions
@@ -159,6 +213,9 @@ def download():
     data_fim_s = request.form.get("data_final", "")
     ambiente   = request.form.get("ambiente", "producao")
     nsu_ini    = int(request.form.get("nsu_inicial", 0) or 0)
+    tipo_nfse  = request.form.get("tipo_nfse", "todas")   # todas | emitidas | recebidas
+    if tipo_nfse not in ("todas", "emitidas", "recebidas"):
+        tipo_nfse = "todas"
 
     if len(cnpj) != 14:
         return jsonify({"error": "CNPJ inválido. Informe os 14 dígitos."}), 400
@@ -200,18 +257,44 @@ def download():
                 "log": messages,
             }), 404
 
-        # Build XLSX rows
+        # ── Parse + classify every note ────────────────────────────────────
         xlsx_rows = []
         for i, entry in enumerate(results):
-            chave = entry[0]
-            xml   = entry[1]
-            nsu_val = i + 1  # fallback; ideally pass NSU from the batch
-            xlsx_rows.append(parse_nfse(chave, nsu_val, xml))
+            chave   = entry[0]
+            xml     = entry[1]
+            nsu_val = i + 1
+            xlsx_rows.append(parse_nfse(chave, nsu_val, xml, cnpj_contribuinte=cnpj))
 
-        # Build ZIP (XMLs + XLSX)
-        safe_nome = "".join(c for c in nome if c.isalnum() or c in " _-")[:40]
-        periodo   = f"{data_ini.strftime('%Y%m')}-{data_fim.strftime('%Y%m')}"
-        zip_name  = f"NFS-e_{cnpj}_{safe_nome}_{periodo}.zip"
+        # ── Apply tipo filter (after full download — never miss a note) ────
+        total_baixadas = len(results)
+        results, xlsx_rows = _filter_by_tipo(results, xlsx_rows, tipo_nfse)
+
+        tipo_label = {"emitidas": "emitidas", "recebidas": "recebidas"}.get(tipo_nfse, "")
+        if not results:
+            tipo_msg = f" {tipo_label}" if tipo_label else ""
+            return jsonify({
+                "error": (
+                    f"Nenhuma NFS-e{tipo_msg} encontrada no período informado "
+                    f"(total baixado: {total_baixadas}, nenhuma classificada como {tipo_label or 'qualquer tipo'})."
+                ),
+                "log": messages,
+            }), 404
+
+        # ── Summary counts by type ──────────────────────────────────────────
+        contagem = {"Emitida": 0, "Recebida": 0, "Indefinida": 0}
+        for row in xlsx_rows:
+            contagem[row["Tipo"]] = contagem.get(row["Tipo"], 0) + 1
+        messages.append(
+            f"  Resumo: {len(xlsx_rows)} nota(s) exportadas "
+            f"[Emitidas: {contagem['Emitida']} | Recebidas: {contagem['Recebida']} | Indefinidas: {contagem['Indefinida']}]"
+            + (f" — filtro: {tipo_label}" if tipo_label else "")
+        )
+
+        # ── Build ZIP (XMLs + XLSX) ─────────────────────────────────────────
+        safe_nome   = "".join(c for c in nome if c.isalnum() or c in " _-")[:40]
+        periodo     = f"{data_ini.strftime('%Y%m')}-{data_fim.strftime('%Y%m')}"
+        tipo_suffix = {"emitidas": "_Emitidas", "recebidas": "_Recebidas"}.get(tipo_nfse, "")
+        zip_name    = f"NFS-e_{cnpj}_{safe_nome}_{periodo}{tipo_suffix}.zip"
 
         zip_buf = io.BytesIO()
         seen: set = set()
@@ -234,7 +317,7 @@ def download():
 
             # XLSX
             xlsx_bytes = build_xlsx(xlsx_rows)
-            zf.writestr(f"NFS-e_{cnpj}_{periodo}.xlsx", xlsx_bytes)
+            zf.writestr(f"NFS-e_{cnpj}_{periodo}{tipo_suffix}.xlsx", xlsx_bytes)
 
         zip_buf.seek(0)
         return send_file(zip_buf, mimetype="application/zip",

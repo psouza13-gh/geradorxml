@@ -108,9 +108,11 @@ def autenticar_login(
         )
 
     log("  Token obtido. Autenticado com sucesso.")
+    # IMPORTANT: The portal JS uses  headers:{Authorization: token}  with NO "Bearer" prefix.
+    # Adding "Bearer " causes the JWT middleware to try to parse a non-JWT token and fail.
     session.headers.update({
         "Accept":        "application/json",
-        "Authorization": f"Bearer {token}",
+        "Authorization": token,   # raw token, no "Bearer " prefix
     })
     session.cert = None
     return session

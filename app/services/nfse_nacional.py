@@ -67,9 +67,11 @@ class NfseNacionalClient:
         self._session: requests.Session | None = session  # may be pre-authenticated
         # When session has a Bearer token we must use the portal API (not adn.nfse.gov.br
         # which requires mTLS and refuses all other auth with HTTP 496).
+        # Use portal API whenever a pre-authenticated session is provided (login/senha flow).
+        # That session has Authorization set to the raw portal token (no "Bearer" prefix).
         self._use_portal_api: bool = (
             session is not None
-            and bool((session.headers or {}).get("Authorization", "").startswith("Bearer "))
+            and bool((session.headers or {}).get("Authorization", ""))
         )
         self._portal_dfe_path: str | None = None  # discovered on first successful call
 

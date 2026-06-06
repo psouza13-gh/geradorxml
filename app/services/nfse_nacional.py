@@ -244,6 +244,12 @@ class NfseNacionalClient:
         results: List[Tuple[str, str]] = []
         seen_chaves: set = set()
 
+        # Headers for HTML page requests (NOT application/json — that breaks server-side rendering)
+        html_headers = {
+            "Accept":  "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Referer": f"{PORTAL_BASE}/EmissorNacional/",
+        }
+
         for section_name, section_url in pages:
             log(f"  Buscando NFS-e {section_name} [{di} a {df}]...")
             pagina = 1
@@ -258,14 +264,17 @@ class NfseNacionalClient:
                             "datafim":    df,
                             "pagina":     pagina,
                         },
+                        headers=html_headers,
                         timeout=30,
                     )
                 except requests.RequestException as e:
                     log(f"  Erro ao acessar {section_name} pág.{pagina}: {e}")
                     break
 
+                log(f"  {section_name} pág.{pagina}: HTTP {resp.status_code} | URL: {resp.url[:80]}")
+
                 if not resp.ok:
-                    log(f"  HTTP {resp.status_code} em {section_name} pág.{pagina} — interrompendo.")
+                    log(f"  Resposta de erro: {resp.text[:200]!r}")
                     break
 
                 # Detect session expiry / redirect to login
@@ -279,19 +288,28 @@ class NfseNacionalClient:
                 chaves = _re.findall(r'data-chave=["\'](\d{20,})["\']', resp.text)
                 novos  = [c for c in chaves if c not in seen_chaves]
 
+                log(f"  {section_name} pág.{pagina}: {len(chaves)} chave(s) encontrada(s) no HTML ({len(novos)} nova(s))")
+
                 if not novos:
                     if pagina == 1:
+                        # Log a snippet to diagnose if page rendered correctly
+                        snippet = resp.text[resp.text.find("<body"):resp.text.find("<body") + 300] if "<body" in resp.text else resp.text[:300]
+                        log(f"  [diagnóstico] HTML snippet: {snippet!r}")
                         log(f"  Nenhuma NFS-e {section_name} no período.")
                     else:
                         log(f"  {section_name}: fim na pág.{pagina} (sem mais registros).")
                     break
 
-                log(f"  {section_name} pág.{pagina}: {len(novos)} nota(s). Baixando XMLs...")
+                log(f"  {section_name} pág.{pagina}: baixando {len(novos)} XML(s)...")
 
                 for chave in novos:
                     seen_chaves.add(chave)
                     try:
-                        xml_resp = session.get(PORTAL_DOWNLOAD_URL + chave, timeout=30)
+                        xml_resp = session.get(
+                            PORTAL_DOWNLOAD_URL + chave,
+                            headers={"Accept": "application/xml,text/xml,*/*;q=0.8"},
+                            timeout=30,
+                        )
                     except requests.RequestException as e:
                         log(f"  Erro ao baixar XML {chave[:20]}...: {e}")
                         continue

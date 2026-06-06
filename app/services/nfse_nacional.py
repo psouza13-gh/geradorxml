@@ -414,63 +414,50 @@ class NfseNacionalClient:
             return None
 
         modal_html = modal_resp.text
-        log(f"  Modal captcha: HTTP {modal_resp.status_code} | {len(modal_html)} chars | {modal_html[:3000]!r}")
 
-        # Extract CSRF token — search broadly anywhere in the HTML
-        # ASP.NET encodes it as a hidden input with name __RequestVerificationToken
-        cs = (
-            _re.search(r'name=["\']__RequestVerificationToken["\'][^>]*value=["\']([^"\']{10,})["\']', modal_html, _re.I)
-            or _re.search(r'value=["\']([^"\']{10,})["\'][^>]*name=["\']__RequestVerificationToken["\']', modal_html, _re.I)
-            or _re.search(r'__RequestVerificationToken.*?value=["\']([^"\']{10,})["\']', modal_html, _re.I | _re.S)
-        )
+        # Parse form fields (no __RequestVerificationToken in this form)
+        # Form: action="/EmissorNacional/DPS/ModalCaptcha/SolicitarCaptcha"
+        # Fields: HCaptchaPublicKey, RedirectUrl, h-captcha-response
+        fa  = _re.search(r'<form[^>]+action=["\']([^"\']+)["\']', modal_html, _re.I)
+        hpk = _re.search(r'name=["\']HCaptchaPublicKey["\'][^>]*value=["\']([^"\']+)["\']', modal_html, _re.I) \
+              or _re.search(r'value=["\']([^"\']+)["\'][^>]*name=["\']HCaptchaPublicKey["\']', modal_html, _re.I)
+        ru  = _re.search(r'name=["\']RedirectUrl["\'][^>]*value=["\']([^"\']+)["\']', modal_html, _re.I) \
+              or _re.search(r'value=["\']([^"\']+)["\'][^>]*name=["\']RedirectUrl["\']', modal_html, _re.I)
 
-        # Extract redirectUrl hidden field if present
-        ru = _re.search(r'name=["\']redirectUrl["\'][^>]*value=["\']([^"\']+)["\']', modal_html, _re.I) \
-             or _re.search(r'value=["\']([^"\']+)["\'][^>]*name=["\']redirectUrl["\']', modal_html, _re.I)
-
-        if not cs:
-            log(f"  CSRF não encontrado no modal — não é possível submeter captcha.")
-            return None
-
-        csrf_token   = cs.group(1)
+        action_url   = PORTAL_BASE + (fa.group(1) if fa else "/EmissorNacional/DPS/ModalCaptcha/SolicitarCaptcha")
+        site_key     = hpk.group(1) if hpk else "e02c27a0-0542-4c9a-88da-e48697acd87c"
         redirect_val = ru.group(1) if ru else download_path
 
-        # The captcha POST action — try to find in HTML; fall back to standard path
-        fa = _re.search(r'<form[^>]+action=["\']([^"\']+)["\']', modal_html, _re.I)
-        action_url = (PORTAL_BASE + fa.group(1)) if fa else f"{PORTAL_BASE}/EmissorNacional/DPS/ModalCaptcha/Validar/"
-        if fa and not action_url.startswith("http"):
-            action_url = PORTAL_BASE + fa.group(1)
-
-        log(f"  Captcha POST → {action_url} | csrf={csrf_token[:20]}... | redirect={redirect_val[:40]}")
+        log(f"  Captcha POST → {action_url} | sitekey={site_key[:20]} | redirect={redirect_val[-44:]}")
 
         try:
             post_r = _post_no_auth(action_url, {
-                "__RequestVerificationToken": csrf_token,
-                "redirectUrl":               redirect_val,
-                "h-captcha-response":        "",   # empty — server skips for authenticated users
+                "HCaptchaPublicKey":  site_key,
+                "RedirectUrl":        redirect_val,
+                "h-captcha-response": "",   # empty — testing if server skips for auth users
             })
         except requests.RequestException as e:
-            log(f"  Captcha POST erro {chave[:20]}...: {e}")
+            log(f"  Captcha POST erro: {e}")
             return None
 
-        log(f"  Captcha POST: HTTP {post_r.status_code} | {post_r.text[:400]!r}")
+        log(f"  Captcha POST: HTTP {post_r.status_code} | {post_r.text[:300]!r}")
 
         try:
             data = post_r.json()
         except Exception:
-            log(f"  Resposta não-JSON: {post_r.text[:300]!r}")
+            log(f"  Resposta não-JSON: {post_r.text[:200]!r}")
             return None
 
         if data.get("Sucesso") and data.get("RedirectUrl"):
             final_url = data["RedirectUrl"]
             if not final_url.startswith("http"):
                 final_url = PORTAL_BASE + final_url
-            log(f"  Captcha OK → baixando de {final_url[:80]}")
+            log(f"  Captcha OK → {final_url[-44:]}")
             try:
                 xml_r = _get_no_auth(final_url, {"Accept": "application/xml,*/*"})
                 if xml_r.ok:
                     return self._validar_xml(xml_r.text, chave, log)
-                log(f"  Download final HTTP {xml_r.status_code}")
+                log(f"  Download final HTTP {xml_r.status_code} | {xml_r.text[:100]!r}")
             except requests.RequestException as e:
                 log(f"  Download final erro: {e}")
         else:

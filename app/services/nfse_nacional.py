@@ -414,67 +414,67 @@ class NfseNacionalClient:
             return None
 
         modal_html = modal_resp.text
+        log(f"  Modal captcha: HTTP {modal_resp.status_code} | {len(modal_html)} chars | {modal_html[:3000]!r}")
 
-        # Find form action (try multiple attribute orderings)
-        fa = (
-            _re.search(r'<form[^>]+action=["\']([^"\']+)["\']', modal_html, _re.I)
-            or _re.search(r'action=["\']([^"\']+)["\'][^>]*method', modal_html, _re.I)
-        )
-        # Find CSRF token
+        # Extract CSRF token — search broadly anywhere in the HTML
+        # ASP.NET encodes it as a hidden input with name __RequestVerificationToken
         cs = (
-            _re.search(r'<input[^>]+name=["\']__RequestVerificationToken["\'][^>]+value=["\']([^"\']+)["\']', modal_html, _re.I)
-            or _re.search(r'<input[^>]+value=["\']([^"\']+)["\'][^>]+name=["\']__RequestVerificationToken["\']', modal_html, _re.I)
+            _re.search(r'name=["\']__RequestVerificationToken["\'][^>]*value=["\']([^"\']{10,})["\']', modal_html, _re.I)
+            or _re.search(r'value=["\']([^"\']{10,})["\'][^>]*name=["\']__RequestVerificationToken["\']', modal_html, _re.I)
+            or _re.search(r'__RequestVerificationToken.*?value=["\']([^"\']{10,})["\']', modal_html, _re.I | _re.S)
         )
-        # Find redirectUrl hidden field
-        ru = _re.search(r'<input[^>]+name=["\']redirectUrl["\'][^>]+value=["\']([^"\']+)["\']', modal_html, _re.I)
 
-        if not fa or not cs:
-            # Show more HTML to diagnose form structure
-            form_pos = modal_html.lower().find("<form")
-            snippet = (
-                modal_html[form_pos:form_pos + 600] if form_pos >= 0
-                else modal_html[:1500]
-            )
-            log(f"  Captcha form não encontrado para {chave[:20]}... | HTTP {modal_resp.status_code} | form_pos={form_pos} | {snippet!r}")
+        # Extract redirectUrl hidden field if present
+        ru = _re.search(r'name=["\']redirectUrl["\'][^>]*value=["\']([^"\']+)["\']', modal_html, _re.I) \
+             or _re.search(r'value=["\']([^"\']+)["\'][^>]*name=["\']redirectUrl["\']', modal_html, _re.I)
+
+        if not cs:
+            log(f"  CSRF não encontrado no modal — não é possível submeter captcha.")
             return None
 
-        action_url   = fa.group(1)
-        if not action_url.startswith("http"):
-            action_url = PORTAL_BASE + action_url
         csrf_token   = cs.group(1)
         redirect_val = ru.group(1) if ru else download_path
+
+        # The captcha POST action — try to find in HTML; fall back to standard path
+        fa = _re.search(r'<form[^>]+action=["\']([^"\']+)["\']', modal_html, _re.I)
+        action_url = (PORTAL_BASE + fa.group(1)) if fa else f"{PORTAL_BASE}/EmissorNacional/DPS/ModalCaptcha/Validar/"
+        if fa and not action_url.startswith("http"):
+            action_url = PORTAL_BASE + fa.group(1)
+
+        log(f"  Captcha POST → {action_url} | csrf={csrf_token[:20]}... | redirect={redirect_val[:40]}")
 
         try:
             post_r = _post_no_auth(action_url, {
                 "__RequestVerificationToken": csrf_token,
                 "redirectUrl":               redirect_val,
-                "h-captcha-response":        "",   # empty — server may skip for auth users
+                "h-captcha-response":        "",   # empty — server skips for authenticated users
             })
         except requests.RequestException as e:
             log(f"  Captcha POST erro {chave[:20]}...: {e}")
             return None
 
-        log(f"  Captcha POST: HTTP {post_r.status_code} | {post_r.text[:200]!r}")
+        log(f"  Captcha POST: HTTP {post_r.status_code} | {post_r.text[:400]!r}")
 
         try:
             data = post_r.json()
         except Exception:
-            log(f"  Captcha POST resposta não-JSON: {post_r.text[:200]!r}")
+            log(f"  Resposta não-JSON: {post_r.text[:300]!r}")
             return None
 
         if data.get("Sucesso") and data.get("RedirectUrl"):
             final_url = data["RedirectUrl"]
             if not final_url.startswith("http"):
                 final_url = PORTAL_BASE + final_url
+            log(f"  Captcha OK → baixando de {final_url[:80]}")
             try:
                 xml_r = _get_no_auth(final_url, {"Accept": "application/xml,*/*"})
                 if xml_r.ok:
                     return self._validar_xml(xml_r.text, chave, log)
-                log(f"  Download final HTTP {xml_r.status_code} {chave[:20]}...")
+                log(f"  Download final HTTP {xml_r.status_code}")
             except requests.RequestException as e:
-                log(f"  Download final erro {chave[:20]}...: {e}")
+                log(f"  Download final erro: {e}")
         else:
-            log(f"  Captcha inválido para {chave[:20]}...: {data.get('Mensagem', data)!r}")
+            log(f"  Captcha rejeitado: {data!r}")
 
         return None
 

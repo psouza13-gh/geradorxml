@@ -338,8 +338,11 @@ footer{padding:28px 52px;display:flex;align-items:center;justify-content:space-b
 
 <!-- ─────────── NAV ─────────── -->
 <nav id="nav">
-  <a href="#" class="logo">Fiscal<span>Hub</span></a>
-  <a href="#cta" class="nav-pill"><span class="ndot"></span>Começar grátis</a>
+  <a href="/" class="logo">gerador<span>xml</span></a>
+  <div style="display:flex;align-items:center;gap:10px">
+    <a href="/login" style="display:inline-flex;align-items:center;padding:9px 20px;border:1px solid rgba(255,255,255,.12);border-radius:100px;color:rgba(245,245,245,.65);font-size:13px;font-weight:500;transition:color .25s,border-color .25s" onmouseover="this.style.color='#F5F5F5';this.style.borderColor='rgba(255,255,255,.3)'" onmouseout="this.style.color='rgba(245,245,245,.65)';this.style.borderColor='rgba(255,255,255,.12)'">Entrar</a>
+    <a href="/register" class="nav-pill"><span class="ndot"></span>Começar grátis</a>
+  </div>
 </nav>
 
 <!-- ─────────── HERO ─────────── -->
@@ -365,7 +368,7 @@ footer{padding:28px 52px;display:flex;align-items:center;justify-content:space-b
   </p>
 
   <div class="cta-grp">
-    <a href="#cta" class="btn-main">Começar gratuitamente <span class="arr">→</span></a>
+    <a href="/register" class="btn-main">Criar conta grátis <span class="arr">→</span></a>
     <a href="#como" class="btn-ghost">Como funciona ↓</a>
   </div>
 
@@ -604,7 +607,7 @@ footer{padding:28px 52px;display:flex;align-items:center;justify-content:space-b
         <div class="plan-feature">ZIP com XMLs + Excel</div>
         <div class="plan-feature">Certificado digital A1 (.pfx)</div>
         <div class="plan-feature">Trial 24h grátis · 1 CNPJ</div>
-        <button class="plan-cta plan-cta-ghost" onclick="irParaCTA('Starter')">Começar grátis →</button>
+        <button class="plan-cta plan-cta-ghost" onclick="window.location.href='/register'">Começar grátis →</button>
         <div class="plan-trial">Sem cartão de crédito</div>
       </div>
 
@@ -623,7 +626,7 @@ footer{padding:28px 52px;display:flex;align-items:center;justify-content:space-b
         <div class="plan-feature">Filtro Emitidas / Recebidas</div>
         <div class="plan-feature">Excel com classificação automática</div>
         <div class="plan-feature">Suporte prioritário</div>
-        <button class="plan-cta plan-cta-main" onclick="irParaCTA('Pro')">Começar grátis →</button>
+        <button class="plan-cta plan-cta-main" onclick="window.location.href='/register'">Começar grátis →</button>
         <div class="plan-trial">Trial 24h · 1 CNPJ · sem cartão</div>
       </div>
 
@@ -641,7 +644,7 @@ footer{padding:28px 52px;display:flex;align-items:center;justify-content:space-b
         <div class="plan-feature">Downloads em lote multi-cliente</div>
         <div class="plan-feature">Relatórios avançados por cliente</div>
         <div class="plan-feature">Onboarding dedicado</div>
-        <button class="plan-cta plan-cta-ghost" onclick="irParaCTA('Office')">Começar grátis →</button>
+        <button class="plan-cta plan-cta-ghost" onclick="window.location.href='/register'">Começar grátis →</button>
         <div class="plan-trial">Sem cartão de crédito</div>
       </div>
 
@@ -752,8 +755,8 @@ footer{padding:28px 52px;display:flex;align-items:center;justify-content:space-b
   <div class="fcta-box rv">
     <p class="sl" style="justify-content:center;margin-bottom:20px">Comece Hoje</p>
     <h2>Comece agora.<br/><em>24h grátis</em>, 1 CNPJ.</h2>
-    <p class="sub">Preencha abaixo e nossa equipe entra em contato para ativar seu trial imediatamente via WhatsApp.</p>
-    <div class="cta-form">
+    <p class="sub">Crie sua conta em segundos — sem cartão de crédito. Trial ativo imediatamente.</p>
+    <div class="cta-form" style="display:none">
       <input type="text" id="f-nome" placeholder="Nome completo" autocomplete="name"/>
       <input type="email" id="f-email" placeholder="E-mail profissional" autocomplete="email"/>
       <input type="tel" id="f-wpp" placeholder="WhatsApp com DDD" autocomplete="tel"/>
@@ -765,8 +768,9 @@ footer{padding:28px 52px;display:flex;align-items:center;justify-content:space-b
         <option>BPO — R$997/mês (ilimitado + API)</option>
       </select>
     </div>
-    <button class="btn-main btn-main--lg" onclick="enviarWpp()">Quero meu trial gratuito <span class="arr">→</span></button>
+    <a href="/register" class="btn-main btn-main--lg" style="text-decoration:none;display:inline-flex">Criar conta grátis <span class="arr">→</span></a>
     <p class="fcta-micro">✓ Sem cartão de crédito &nbsp;·&nbsp; ✓ Trial 24h · 1 CNPJ &nbsp;·&nbsp; ✓ Cancele quando quiser</p>
+    <p style="margin-top:18px;font-size:13px;color:rgba(245,245,245,.4)">Já tem conta? <a href="/login" style="color:rgba(34,197,94,.8);text-decoration:underline;text-underline-offset:3px">Entrar →</a></p>
   </div>
 </section>
 
@@ -777,9 +781,11 @@ footer{padding:28px 52px;display:flex;align-items:center;justify-content:space-b
     <a href="#diferenciais">Diferenciais</a>
     <a href="#precos">Planos</a>
     <a href="#faq">FAQ</a>
-    <a href="https://wa.me/55SEUNUMERO?text=Oi%2C%20quero%20saber%20mais%20sobre%20o%20FiscalHub" target="_blank">WhatsApp</a>
+    <a href="https://wa.me/55SEUNUMERO?text=Oi%2C%20quero%20saber%20mais%20sobre%20o%20geradorxml" target="_blank">WhatsApp</a>
+    <a href="/login">Entrar</a>
+    <a href="/register">Criar conta</a>
   </div>
-  <p class="ft-copy">© 2025 FiscalHub · Todos os direitos reservados</p>
+  <p class="ft-copy">© 2025 geradorxml · Todos os direitos reservados</p>
 </footer>
 
 <script>

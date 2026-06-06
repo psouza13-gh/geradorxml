@@ -319,46 +319,10 @@ class NfseNacionalClient:
 
                 for chave in novos:
                     seen_chaves.add(chave)
-                    try:
-                        # Prepare request WITHOUT Authorization header.
-                        # The download endpoint is an MVC action (cookie auth).
-                        # Sending the portal Bearer token causes ASP.NET JWT middleware
-                        # to attempt validation, fail, and return HTTP 403.
-                        req  = requests.Request(
-                            "GET",
-                            PORTAL_DOWNLOAD_URL + chave,
-                            headers={
-                                "Accept":   "application/xml,text/xml,*/*;q=0.8",
-                                "Referer":  section_url,
-                            },
-                        )
-                        prep = session.prepare_request(req)
-                        prep.headers.pop("Authorization", None)
-                        xml_resp = session.send(prep, timeout=30, allow_redirects=True)
-                    except requests.RequestException as e:
-                        log(f"  Erro ao baixar XML {chave[:20]}...: {e}")
-                        continue
-
-                    if not xml_resp.ok:
-                        log(f"  HTTP {xml_resp.status_code} ao baixar {chave[:20]}...")
-                        continue
-
-                    xml = xml_resp.text
-                    xml_s = xml.strip()
-
-                    # Session expired mid-download?
-                    if "EmissorNacional/Login" in xml_s or 'name="Inscricao"' in xml_s:
-                        raise RuntimeError(
-                            "Sessão expirada ao baixar XMLs. Tente novamente."
-                        )
-
-                    # Basic XML validation
-                    if not (xml_s.startswith("<?xml") or xml_s.startswith("<")):
-                        log(f"  Resposta inválida para {chave[:20]}... (não é XML)")
-                        continue
-
-                    results.append((chave, xml))
-                    log(f"  + {chave}  [{section_name}]")
+                    xml = self._baixar_xml_portal(session, chave, section_url, log)
+                    if xml:
+                        results.append((chave, xml))
+                        log(f"  + {chave}  [{section_name}]")
 
                 # Advance to next page — stop when there are no more rows
                 pagina += 1
@@ -366,6 +330,156 @@ class NfseNacionalClient:
 
         log(f"  Total: {len(results)} nota(s) baixada(s).")
         return results
+
+    def _baixar_xml_portal(
+        self,
+        session: "requests.Session",
+        chave: str,
+        referer: str,
+        log: Callable[[str], None],
+    ) -> "str | None":
+        """
+        Download a single NFS-e XML from the portal.
+
+        Strategy:
+          1. Direct GET (no captcha) — works if server allows for auth users.
+          2. If 403: attempt the captcha modal flow. For authenticated users the
+             server may skip hCaptcha validation and return the RedirectUrl directly.
+
+        Returns the XML string, or None on failure.
+        """
+        import re as _re
+
+        download_path = f"/EmissorNacional/Notas/Download/NFSe/{chave}"
+        download_url  = PORTAL_BASE + download_path
+
+        def _get_no_auth(url, extra_headers=None, **kwargs):
+            """GET request using session cookies but WITHOUT the Authorization header."""
+            hdrs = {"Referer": referer, "Accept": "*/*"}
+            if extra_headers:
+                hdrs.update(extra_headers)
+            req  = requests.Request("GET", url, headers=hdrs)
+            prep = session.prepare_request(req)
+            prep.headers.pop("Authorization", None)
+            return session.send(prep, allow_redirects=True, timeout=30, **kwargs)
+
+        def _post_no_auth(url, data, extra_headers=None, **kwargs):
+            """POST using session cookies but WITHOUT the Authorization header."""
+            hdrs = {
+                "Referer":          referer,
+                "Accept":           "application/json, */*",
+                "Content-Type":     "application/x-www-form-urlencoded",
+                "X-Requested-With": "XMLHttpRequest",
+            }
+            if extra_headers:
+                hdrs.update(extra_headers)
+            req  = requests.Request("POST", url, headers=hdrs, data=data)
+            prep = session.prepare_request(req)
+            prep.headers.pop("Authorization", None)
+            return session.send(prep, allow_redirects=True, timeout=30, **kwargs)
+
+        # ── Attempt 1: direct download ─────────────────────────────────────
+        try:
+            r = _get_no_auth(download_url, {"Accept": "application/xml,text/xml,*/*;q=0.8"})
+        except requests.RequestException as e:
+            log(f"  Erro de conexão {chave[:20]}...: {e}")
+            return None
+
+        if r.ok:
+            return self._validar_xml(r.text, chave, log)
+
+        if r.status_code != 403:
+            log(f"  HTTP {r.status_code} ao baixar {chave[:20]}... | {r.text[:100]!r}")
+            return None
+
+        # ── Attempt 2: captcha modal flow ──────────────────────────────────
+        # The portal uses hCaptcha as a gate before the download. For authenticated
+        # users the server may skip captcha verification and return the RedirectUrl.
+        try:
+            captcha_open = f"{PORTAL_BASE}/EmissorNacional/DPS/ModalCaptcha/Abrir/"
+            modal_r = _get_no_auth(
+                captcha_open,
+                {"Accept": "text/html,*/*;q=0.8", "X-Requested-With": "XMLHttpRequest"},
+            )
+            modal_r2 = session.get(
+                captcha_open,
+                params={"redirectUrl": download_path},
+                headers={
+                    "Accept":           "text/html,*/*;q=0.8",
+                    "Referer":          referer,
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+                timeout=30,
+            )
+        except requests.RequestException as e:
+            log(f"  Captcha modal erro {chave[:20]}...: {e}")
+            return None
+
+        modal_html = modal_r2.text
+        # Extract form action
+        fa = _re.search(r'<form[^>]+action=["\']([^"\']+)["\']', modal_html, _re.I)
+        # Extract CSRF token
+        cs = (
+            _re.search(r'<input[^>]+name=["\']__RequestVerificationToken["\'][^>]+value=["\']([^"\']+)["\']', modal_html, _re.I)
+            or _re.search(r'<input[^>]+value=["\']([^"\']+)["\'][^>]+name=["\']__RequestVerificationToken["\']', modal_html, _re.I)
+        )
+        # Extract redirectUrl hidden field (may differ from our path)
+        ru = _re.search(r'<input[^>]+name=["\']redirectUrl["\'][^>]+value=["\']([^"\']+)["\']', modal_html, _re.I)
+
+        if not fa or not cs:
+            log(f"  Captcha form não encontrado para {chave[:20]}... | modal HTTP {modal_r2.status_code} | {modal_html[:200]!r}")
+            return None
+
+        action_url   = fa.group(1)
+        if not action_url.startswith("http"):
+            action_url = PORTAL_BASE + action_url
+        csrf_token   = cs.group(1)
+        redirect_val = ru.group(1) if ru else download_path
+
+        try:
+            post_r = _post_no_auth(action_url, {
+                "__RequestVerificationToken": csrf_token,
+                "redirectUrl":               redirect_val,
+                "h-captcha-response":        "",   # empty — server may skip for auth users
+            })
+        except requests.RequestException as e:
+            log(f"  Captcha POST erro {chave[:20]}...: {e}")
+            return None
+
+        log(f"  Captcha POST: HTTP {post_r.status_code} | {post_r.text[:200]!r}")
+
+        try:
+            data = post_r.json()
+        except Exception:
+            log(f"  Captcha POST resposta não-JSON: {post_r.text[:200]!r}")
+            return None
+
+        if data.get("Sucesso") and data.get("RedirectUrl"):
+            final_url = data["RedirectUrl"]
+            if not final_url.startswith("http"):
+                final_url = PORTAL_BASE + final_url
+            try:
+                xml_r = _get_no_auth(final_url, {"Accept": "application/xml,*/*"})
+                if xml_r.ok:
+                    return self._validar_xml(xml_r.text, chave, log)
+                log(f"  Download final HTTP {xml_r.status_code} {chave[:20]}...")
+            except requests.RequestException as e:
+                log(f"  Download final erro {chave[:20]}...: {e}")
+        else:
+            log(f"  Captcha inválido para {chave[:20]}...: {data.get('Mensagem', data)!r}")
+
+        return None
+
+    @staticmethod
+    def _validar_xml(text: str, chave: str, log: Callable) -> "str | None":
+        """Return XML string if valid, None otherwise."""
+        s = text.strip()
+        if "EmissorNacional/Login" in s or 'name="Inscricao"' in s:
+            raise RuntimeError("Sessão expirada ao baixar XMLs. Tente novamente.")
+        if s.startswith("<?xml") or (s.startswith("<") and "</" in s):
+            return text
+        log(f"  Resposta inválida para {chave[:20]}... (não é XML): {s[:80]!r}")
+        return None
 
     def _buscar_dfe_batch(
         self, nsu: int, log: Callable[[str], None]

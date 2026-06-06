@@ -292,9 +292,16 @@ class NfseNacionalClient:
 
                 if not novos:
                     if pagina == 1:
-                        # Log a snippet to diagnose if page rendered correctly
-                        snippet = resp.text[resp.text.find("<body"):resp.text.find("<body") + 300] if "<body" in resp.text else resp.text[:300]
-                        log(f"  [diagnóstico] HTML snippet: {snippet!r}")
+                        # Look for table content or "sem registros" message to diagnose
+                        html = resp.text
+                        table_pos = html.lower().find("<table")
+                        if table_pos >= 0:
+                            snippet = html[table_pos:table_pos + 400]
+                        elif "sem registros" in html.lower() or "nenhum" in html.lower() or "não encontrado" in html.lower():
+                            snippet = "[página indica: sem registros no período]"
+                        else:
+                            snippet = html[html.find("<body"):html.find("<body") + 300] if "<body" in html else html[:300]
+                        log(f"  [diagnóstico] conteúdo da tabela: {snippet!r}")
                         log(f"  Nenhuma NFS-e {section_name} no período.")
                     else:
                         log(f"  {section_name}: fim na pág.{pagina} (sem mais registros).")

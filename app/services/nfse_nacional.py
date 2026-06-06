@@ -284,8 +284,16 @@ class NfseNacionalClient:
                         "Tente novamente."
                     )
 
-                # Extract access keys from HTML table rows: <tr data-chave="44digits">
-                chaves = _re.findall(r'data-chave=["\'](\d{20,})["\']', resp.text)
+                # Extract NFS-e access keys from XML download links.
+                # The portal uses Base64 in data-chave (internal use only).
+                # The actual 44-digit chave de acesso appears in the download href:
+                #   href="/EmissorNacional/Notas/Download/NFSe/{chave}"
+                chaves = _re.findall(
+                    r'/EmissorNacional/Notas/Download/NFSe/([^"\'&\s]{20,})',
+                    resp.text,
+                )
+                # Deduplicate (same key may appear for XML and DANFS-e links)
+                chaves = list(dict.fromkeys(chaves))
                 novos  = [c for c in chaves if c not in seen_chaves]
 
                 log(f"  {section_name} pág.{pagina}: {len(chaves)} chave(s) encontrada(s) no HTML ({len(novos)} nova(s))")

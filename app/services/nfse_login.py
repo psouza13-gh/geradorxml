@@ -95,25 +95,24 @@ def autenticar_login(
             f"{err or 'Verifique o CPF/CNPJ e a senha.'}"
         )
 
-    log("  Login aceito. Obtendo token de acesso...")
+    log("  Login aceito.")
 
-    # ── Step 3: Multi-strategy token acquisition ──────────────────────────────
+    # ── Step 3: Optional token acquisition ────────────────────────────────────
+    # Token is used only for REST API calls. The HTML scraping approach (which
+    # is what we actually use for download) works with session cookies alone.
+    # We try to get the token anyway, but do NOT block if it fails.
     token, diag = _acquire_token(session, resp)
 
-    if not token:
-        raise RuntimeError(
-            "Autenticação realizada no portal, mas não foi possível obter o "
-            "token de acesso à API NFS-e.\n\n"
-            f"Diagnóstico:\n{diag}"
-        )
+    if token:
+        log("  Token de acesso obtido.")
+        # IMPORTANT: portal JS uses  headers:{Authorization: token}  — NO "Bearer" prefix.
+        session.headers.update({
+            "Accept":        "application/json",
+            "Authorization": token,
+        })
+    else:
+        log("  Sessão autenticada via cookie (download por varredura de páginas).")
 
-    log("  Token obtido. Autenticado com sucesso.")
-    # IMPORTANT: The portal JS uses  headers:{Authorization: token}  with NO "Bearer" prefix.
-    # Adding "Bearer " causes the JWT middleware to try to parse a non-JWT token and fail.
-    session.headers.update({
-        "Accept":        "application/json",
-        "Authorization": token,   # raw token, no "Bearer " prefix
-    })
     session.cert = None
     return session
 

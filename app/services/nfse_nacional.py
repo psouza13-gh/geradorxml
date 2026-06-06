@@ -23,32 +23,12 @@ from app.services.cert_handler import export_to_pem_files
 BASE_URL_PROD = "https://adn.nfse.gov.br/contribuintes"
 BASE_URL_TEST = "https://adn.producaorestrita.nfse.gov.br/contribuintes"
 
-# Portal backend API (used when authenticating with login/senha instead of certificate).
-# The portal proxies requests to adn.nfse.gov.br using a server-side certificate.
-# Endpoints are tried in order; the first one that returns valid DFe data is kept.
 PORTAL_BASE = "https://www.nfse.gov.br"
-PORTAL_DFE_CANDIDATES = [
-    # Based on confirmed MVC pages: /EmissorNacional/Dfe and /EmissorNacional/Distribuicao
-    "/EmissorNacional/api/Dfe/{nsu}",
-    "/EmissorNacional/api/Dfe/Get/{nsu}",
-    "/EmissorNacional/api/Dfe/ObterDFe/{nsu}",
-    "/EmissorNacional/api/Dfe/ObterDFe?ultimoNsu={nsu}",
-    "/EmissorNacional/api/Dfe/Distribuicao/{nsu}",
-    "/EmissorNacional/api/Dfe/Distribuicao?ultimoNsu={nsu}",
-    "/EmissorNacional/api/Distribuicao/{nsu}",
-    "/EmissorNacional/api/Distribuicao/Get/{nsu}",
-    "/EmissorNacional/api/Distribuicao/ObterDFe/{nsu}",
-    "/EmissorNacional/api/Distribuicao/ObterDFe?ultimoNsu={nsu}",
-    "/EmissorNacional/api/Distribuicao/DFe/{nsu}",
-    "/EmissorNacional/api/Distribuicao/DFe?ultimoNsu={nsu}",
-    # Other variations
-    "/EmissorNacional/api/DFe/{nsu}",
-    "/EmissorNacional/api/DFe/Get/{nsu}",
-    "/EmissorNacional/api/distribuicao/DFe/{nsu}",
-    "/EmissorNacional/api/contribuintes/DFe/{nsu}",
-    "/EmissorNacional/api/contribuintes/DFe?ultimoNsu={nsu}",
-    "/EmissorNacional/api/dfe/distribuicao/{nsu}",
-]
+# Portal HTML pages (server-side rendered — no separate REST API for note listing)
+PORTAL_RECEBIDAS_URL = f"{PORTAL_BASE}/EmissorNacional/Notas/Recebidas"
+PORTAL_EMITIDAS_URL  = f"{PORTAL_BASE}/EmissorNacional/Notas/Emitidas"
+# Direct XML download (authenticated GET — captcha is JS-only, bypassed server-side)
+PORTAL_DOWNLOAD_URL  = f"{PORTAL_BASE}/EmissorNacional/Notas/Download/NFSe/"
 
 MAX_ITERATIONS = 500   # safety cap (~25.000 notas)
 
@@ -77,15 +57,9 @@ class NfseNacionalClient:
         self.cert_password = cert_password
         self.base_url = BASE_URL_PROD if ambiente == "producao" else BASE_URL_TEST
         self._session: requests.Session | None = session  # may be pre-authenticated
-        # When session has a Bearer token we must use the portal API (not adn.nfse.gov.br
-        # which requires mTLS and refuses all other auth with HTTP 496).
-        # Use portal API whenever a pre-authenticated session is provided (login/senha flow).
-        # That session has Authorization set to the raw portal token (no "Bearer" prefix).
-        self._use_portal_api: bool = (
-            session is not None
-            and bool((session.headers or {}).get("Authorization", ""))
-        )
-        self._portal_dfe_path: str | None = None  # discovered on first successful call
+        # Any pre-authenticated session (login/senha) uses portal HTML scraping.
+        # Certificate (mTLS) path uses the adn.nfse.gov.br REST API.
+        self._use_portal_api: bool = session is not None
 
     # ─── Session ──────────────────────────────────────────────────────────
 
@@ -111,15 +85,25 @@ class NfseNacionalClient:
         data_final: date,
         log: Callable[[str], None] = print,
         nsu_inicial: int = 0,
+        tipo_scraping: str = "todas",
     ) -> List[Tuple[str, str]]:
         """
         Download NFS-e for the given period.
 
-        Phase 1 (when nsu_inicial==0): binary search to find the NSU closest
-        to data_inicial — costs ~10 API calls instead of iterating everything.
-        Phase 2: sequential download from that NSU until past data_final.
-        No gaps — every NSU in the range is visited.
+        When authenticated via login/senha (session provided), scrapes the portal
+        HTML pages directly — no REST API needed.
+
+        When authenticated via certificate (mTLS):
+          Phase 1 (nsu_inicial==0): binary search to find starting NSU (~10 API calls).
+          Phase 2: sequential download from that NSU until past data_final.
+
+        tipo_scraping: "todas" | "emitidas" | "recebidas"
+          For portal scraping: controls which pages to fetch (optimization).
+          For cert auth: ignored (filter applied later in api/download.py).
         """
+        if self._use_portal_api:
+            return self._consultar_portal_html(data_inicial, data_final, log, tipo_scraping)
+
         # ── Phase 1: find starting NSU ─────────────────────────────────────
         if nsu_inicial == 0:
             nsu = self._buscar_nsu_para_data(data_inicial, log)
@@ -218,92 +202,135 @@ class NfseNacionalClient:
         def _noop(_): pass
         return self._buscar_dfe_batch(nsu, _noop)
 
-    def _buscar_dfe_batch_portal(
-        self, nsu: int, log: Callable[[str], None]
-    ) -> Tuple[List[Tuple[str, str]], int, bool]:
+    def _consultar_portal_html(
+        self,
+        data_inicial: date,
+        data_final: date,
+        log: Callable[[str], None],
+        tipo_scraping: str = "todas",
+    ) -> List[Tuple[str, str]]:
         """
-        DFe distribution via the portal backend API (Bearer token auth).
-        Auto-discovers the correct endpoint by trying candidates in order.
-        The portal proxies the request to adn.nfse.gov.br using a server certificate.
+        Download NFS-e by scraping the portal HTML pages (Emitidas + Recebidas).
+        Used when authenticated with login/senha (session cookie auth).
+
+        The portal renders note lists server-side. XML files are accessible at:
+          GET /EmissorNacional/Notas/Download/NFSe/{chave_acesso}
+        The captcha on that URL is a client-side JS interception only — server-side
+        authenticated requests bypass it entirely.
+
+        tipo_scraping controls which pages to fetch:
+          "emitidas"  → only /Notas/Emitidas
+          "recebidas" → only /Notas/Recebidas
+          "todas"     → both pages
         """
+        import re as _re
+
         session = self._get_session()
+        di = data_inicial.strftime("%d/%m/%Y")
+        df = data_final.strftime("%d/%m/%Y")
 
-        # If endpoint already discovered, use it directly
-        if self._portal_dfe_path:
-            candidates = [self._portal_dfe_path]
+        # Select pages based on tipo hint (saves unnecessary requests)
+        all_pages = [
+            ("Recebidas", PORTAL_RECEBIDAS_URL),
+            ("Emitidas",  PORTAL_EMITIDAS_URL),
+        ]
+        if tipo_scraping == "emitidas":
+            pages = [p for p in all_pages if p[0] == "Emitidas"]
+        elif tipo_scraping == "recebidas":
+            pages = [p for p in all_pages if p[0] == "Recebidas"]
         else:
-            candidates = PORTAL_DFE_CANDIDATES
+            pages = all_pages
 
-        all_errors = []   # collect every attempt for diagnostics
+        results: List[Tuple[str, str]] = []
+        seen_chaves: set = set()
 
-        for path_tpl in candidates:
-            url = PORTAL_BASE + path_tpl.format(nsu=nsu)
+        for section_name, section_url in pages:
+            log(f"  Buscando NFS-e {section_name} [{di} a {df}]...")
+            pagina = 1
 
-            retry = 0
-            resp  = None
-            while retry < 3:
+            while True:
                 try:
-                    resp = session.get(url, timeout=60)
+                    resp = session.get(
+                        section_url,
+                        params={
+                            "busca":      "",
+                            "datainicio": di,
+                            "datafim":    df,
+                            "pagina":     pagina,
+                        },
+                        timeout=30,
+                    )
                 except requests.RequestException as e:
-                    log(f"  Erro de conexão: {e}")
-                    return [], nsu, True
+                    log(f"  Erro ao acessar {section_name} pág.{pagina}: {e}")
+                    break
 
-                if resp.status_code == 429:
-                    wait = int(resp.headers.get("Retry-After", 0)) or 10 * (retry + 1)
-                    log(f"  Rate limit (429) — aguardando {wait}s ...")
-                    time.sleep(wait)
-                    retry += 1
-                    continue
-                break
+                if not resp.ok:
+                    log(f"  HTTP {resp.status_code} em {section_name} pág.{pagina} — interrompendo.")
+                    break
 
-            if resp is None or resp.status_code == 429:
-                continue
+                # Detect session expiry / redirect to login
+                if "EmissorNacional/Login" in resp.url or 'name="Inscricao"' in resp.text:
+                    raise RuntimeError(
+                        "Sessão expirada no portal NFS-e durante a consulta. "
+                        "Tente novamente."
+                    )
 
-            status = resp.status_code
-            body   = resp.text[:300]
-            all_errors.append(f"  HTTP {status} {path_tpl.format(nsu='N')} → {body[:120]!r}")
+                # Extract access keys from HTML table rows: <tr data-chave="44digits">
+                chaves = _re.findall(r'data-chave=["\'](\d{20,})["\']', resp.text)
+                novos  = [c for c in chaves if c not in seen_chaves]
 
-            if status in (401, 403):
-                raise RuntimeError(
-                    f"Token rejeitado pela API do portal NFS-e (HTTP {status}). "
-                    "Tente fazer login novamente."
-                )
+                if not novos:
+                    if pagina == 1:
+                        log(f"  Nenhuma NFS-e {section_name} no período.")
+                    else:
+                        log(f"  {section_name}: fim na pág.{pagina} (sem mais registros).")
+                    break
 
-            if status in (404, 204):
-                continue   # wrong endpoint, try next
+                log(f"  {section_name} pág.{pagina}: {len(novos)} nota(s). Baixando XMLs...")
 
-            if not resp.ok:
-                log(f"  Portal endpoint {path_tpl}: HTTP {status} — tentando próximo...")
-                continue
+                for chave in novos:
+                    seen_chaves.add(chave)
+                    try:
+                        xml_resp = session.get(PORTAL_DOWNLOAD_URL + chave, timeout=30)
+                    except requests.RequestException as e:
+                        log(f"  Erro ao baixar XML {chave[:20]}...: {e}")
+                        continue
 
-            # Got a 2xx — parse and validate
-            batch, prox_nsu, fim = self._parse_dfe_response(resp, log)
+                    if not xml_resp.ok:
+                        log(f"  HTTP {xml_resp.status_code} ao baixar {chave[:20]}...")
+                        continue
 
-            if not self._portal_dfe_path:
-                self._portal_dfe_path = path_tpl
-                log(f"  [Portal API endpoint descoberto: {path_tpl}]")
+                    xml = xml_resp.text
+                    xml_s = xml.strip()
 
-            return batch, prox_nsu, fim
+                    # Session expired mid-download?
+                    if "EmissorNacional/Login" in xml_s or 'name="Inscricao"' in xml_s:
+                        raise RuntimeError(
+                            "Sessão expirada ao baixar XMLs. Tente novamente."
+                        )
 
-        # All candidates exhausted — show every attempt in the error
-        detail = "\n".join(all_errors)
-        raise RuntimeError(
-            "Nenhum endpoint da API do portal NFS-e respondeu corretamente.\n\n"
-            f"Tentativas:\n{detail}\n\n"
-            "Envie este log para suporte ou use o Certificado Digital A1."
-        )
+                    # Basic XML validation
+                    if not (xml_s.startswith("<?xml") or xml_s.startswith("<")):
+                        log(f"  Resposta inválida para {chave[:20]}... (não é XML)")
+                        continue
+
+                    results.append((chave, xml))
+                    log(f"  + {chave}  [{section_name}]")
+
+                # Advance to next page — stop when there are no more rows
+                pagina += 1
+                time.sleep(1)  # be polite to the server
+
+        log(f"  Total: {len(results)} nota(s) baixada(s).")
+        return results
 
     def _buscar_dfe_batch(
         self, nsu: int, log: Callable[[str], None]
     ) -> Tuple[List[Tuple[str, str]], int, bool]:
         """
-        Call the DFe distribution endpoint.
-        - mTLS auth  → adn.nfse.gov.br/contribuintes/DFe/{nsu}
-        - Bearer auth → portal backend API (endpoint auto-discovered)
+        Call the DFe distribution endpoint via mTLS (certificate auth only).
         Returns (batch, prox_nsu, fim_da_fila).
         """
-        if self._use_portal_api:
-            return self._buscar_dfe_batch_portal(nsu, log)
         url = f"{self.base_url}/DFe/{nsu}"
         retry = 0
         resp = None

@@ -241,7 +241,7 @@ def download():
             portal_login = request.form.get("portal_login", "").strip()
             portal_senha = request.form.get("portal_senha", "")
             if not portal_login or not portal_senha:
-                return jsonify({"error": "Informe o login (CPF/e-mail) e a senha do portal Gov.br."}), 400
+                return jsonify({"error": "Informe o CPF/CNPJ e a senha do portal NFS-e."}), 400
 
             try:
                 messages.append(f"  Autenticando no portal NFS-e ({portal_login[:4]}***) ...")
@@ -249,7 +249,7 @@ def download():
             except RuntimeError as e:
                 return jsonify({"error": str(e), "log": messages}), 401
             except Exception as e:
-                return jsonify({"error": f"Falha na autenticação Gov.br: {e}", "log": messages}), 500
+                return jsonify({"error": f"Falha na autenticação: {e}", "log": messages}), 500
 
             client = NfseNacionalClient(
                 cnpj=cnpj, ambiente=ambiente, session=auth_session,
@@ -285,6 +285,7 @@ def download():
             results = client.consultar_por_periodo(
                 data_inicial=data_ini, data_final=data_fim,
                 log=messages.append, nsu_inicial=nsu_ini,
+                tipo_scraping=tipo_nfse,
             )
         except RuntimeError as e:
             return jsonify({"error": str(e), "log": messages}), 400

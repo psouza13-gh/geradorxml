@@ -397,37 +397,45 @@ class NfseNacionalClient:
         # users the server may skip captcha verification and return the RedirectUrl.
         try:
             captcha_open = f"{PORTAL_BASE}/EmissorNacional/DPS/ModalCaptcha/Abrir/"
-            modal_r = _get_no_auth(
-                captcha_open,
-                {"Accept": "text/html,*/*;q=0.8", "X-Requested-With": "XMLHttpRequest"},
-            )
-            modal_r2 = session.get(
-                captcha_open,
+            req_modal = requests.Request(
+                "GET", captcha_open,
                 params={"redirectUrl": download_path},
                 headers={
                     "Accept":           "text/html,*/*;q=0.8",
                     "Referer":          referer,
                     "X-Requested-With": "XMLHttpRequest",
                 },
-                timeout=30,
             )
+            prep_modal = session.prepare_request(req_modal)
+            prep_modal.headers.pop("Authorization", None)
+            modal_resp = session.send(prep_modal, timeout=30)
         except requests.RequestException as e:
             log(f"  Captcha modal erro {chave[:20]}...: {e}")
             return None
 
-        modal_html = modal_r2.text
-        # Extract form action
-        fa = _re.search(r'<form[^>]+action=["\']([^"\']+)["\']', modal_html, _re.I)
-        # Extract CSRF token
+        modal_html = modal_resp.text
+
+        # Find form action (try multiple attribute orderings)
+        fa = (
+            _re.search(r'<form[^>]+action=["\']([^"\']+)["\']', modal_html, _re.I)
+            or _re.search(r'action=["\']([^"\']+)["\'][^>]*method', modal_html, _re.I)
+        )
+        # Find CSRF token
         cs = (
             _re.search(r'<input[^>]+name=["\']__RequestVerificationToken["\'][^>]+value=["\']([^"\']+)["\']', modal_html, _re.I)
             or _re.search(r'<input[^>]+value=["\']([^"\']+)["\'][^>]+name=["\']__RequestVerificationToken["\']', modal_html, _re.I)
         )
-        # Extract redirectUrl hidden field (may differ from our path)
+        # Find redirectUrl hidden field
         ru = _re.search(r'<input[^>]+name=["\']redirectUrl["\'][^>]+value=["\']([^"\']+)["\']', modal_html, _re.I)
 
         if not fa or not cs:
-            log(f"  Captcha form não encontrado para {chave[:20]}... | modal HTTP {modal_r2.status_code} | {modal_html[:200]!r}")
+            # Show more HTML to diagnose form structure
+            form_pos = modal_html.lower().find("<form")
+            snippet = (
+                modal_html[form_pos:form_pos + 600] if form_pos >= 0
+                else modal_html[:1500]
+            )
+            log(f"  Captcha form não encontrado para {chave[:20]}... | HTTP {modal_resp.status_code} | form_pos={form_pos} | {snippet!r}")
             return None
 
         action_url   = fa.group(1)

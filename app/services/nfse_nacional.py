@@ -320,11 +320,21 @@ class NfseNacionalClient:
                 for chave in novos:
                     seen_chaves.add(chave)
                     try:
-                        xml_resp = session.get(
+                        # Prepare request WITHOUT Authorization header.
+                        # The download endpoint is an MVC action (cookie auth).
+                        # Sending the portal Bearer token causes ASP.NET JWT middleware
+                        # to attempt validation, fail, and return HTTP 403.
+                        req  = requests.Request(
+                            "GET",
                             PORTAL_DOWNLOAD_URL + chave,
-                            headers={"Accept": "application/xml,text/xml,*/*;q=0.8"},
-                            timeout=30,
+                            headers={
+                                "Accept":   "application/xml,text/xml,*/*;q=0.8",
+                                "Referer":  section_url,
+                            },
                         )
+                        prep = session.prepare_request(req)
+                        prep.headers.pop("Authorization", None)
+                        xml_resp = session.send(prep, timeout=30, allow_redirects=True)
                     except requests.RequestException as e:
                         log(f"  Erro ao baixar XML {chave[:20]}...: {e}")
                         continue

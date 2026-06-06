@@ -11,6 +11,9 @@
     { "src": "/api/clients(.*)",      "dest": "/api/clients.py"       },
     { "src": "/api/webhook/asaas",    "dest": "/api/webhook_asaas.py" },
     { "src": "/api/(.*)",             "dest": "/api/$1"               },
+    { "src": "/app",                  "dest": "/public/app.html"      },
+    { "src": "/login",                "dest": "/public/login.html"    },
+    { "src": "/register",             "dest": "/public/register.html" },
     { "src": "/(.*)",                 "dest": "/public/$1"            }
   ]
 }

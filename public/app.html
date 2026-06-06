@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>NFS-e Downloader</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    * { font-family:'Inter',sans-serif; }
+    .spin { animation:spin 1s linear infinite; }
+    @keyframes spin { to{transform:rotate(360deg)} }
+    input[type=file]::file-selector-button {
+      background:#3b82f6;color:#fff;border:none;
+      padding:5px 12px;border-radius:6px;cursor:pointer;margin-right:8px;font-size:12px;
+    }
+    ::-webkit-scrollbar{width:6px}
+    ::-webkit-scrollbar-track{background:#1f2937}
+    ::-webkit-scrollbar-thumb{background:#374151;border-radius:3px}
+    .tab-btn {
+      color:#9ca3af;background:#111827;border:1px solid #374151;
+      padding:6px 18px;border-radius:8px;font-size:14px;font-weight:500;
+      cursor:pointer;transition:all .15s;
+    }
+    .tab-btn:hover { color:#fff;border-color:#4b5563; }
+    .tab-btn.active { background:#2563eb;color:#fff;border-color:#2563eb; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+
+<!-- ── TOP BAR ────────────────────────────────────────── -->
+<header class="border-b border-gray-800 px-6 py-3 flex items-center justify-between">
+  <div class="flex items-center gap-3">
+    <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-sm font-bold">NF</div>
+    <span class="font-semibold text-white">NFS-e Downloader</span>
+    <span class="text-xs text-gray-500 hidden sm:block">Sistema Nacional NFS-e</span>
+  </div>
+  <div class="flex gap-2 text-sm">
+    <button onclick="showTab('download')" id="tab-download"
+      class="tab-btn px-4 py-1.5 rounded-lg font-medium transition">Baixar NFS-e</button>
+    <button onclick="showTab('clientes')" id="tab-clientes"
+      class="tab-btn px-4 py-1.5 rounded-lg font-medium transition">Clientes</button>
+  </div>
+</header>
+
+<!-- ══════════════════════════════════════════════════════
+     TAB: BAIXAR NFS-e
+══════════════════════════════════════════════════════ -->
+<div id="page-download" class="max-w-2xl mx-auto p-6 space-y-5">
+
+  <!-- Client selector -->
+  <div id="client-selector-block" class="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+    <div class="flex items-center justify-between mb-3">
+      <span class="text-sm font-medium text-gray-300">Cliente salvo</span>
+      <button onclick="showTab('clientes')" class="text-xs text-blue-400 hover:text-blue-300">+ Gerenciar clientes</button>
+    </div>
+    <select id="client-select" onchange="fillFromClient()"
+      class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+      <option value="">— Selecione um cliente salvo (opcional) —</option>
+    </select>
+  </div>
+
+  <!-- Main form -->
+  <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-5">
+    <h2 class="font-semibold text-white">Configurar Download</h2>
+    <form id="form" class="space-y-4">
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="label">CNPJ <span class="text-red-400">*</span></label>
+          <input id="cnpj" name="cnpj" type="text" placeholder="00.000.000/0001-00" required
+            class="input"/>
+        </div>
+        <div>
+          <label class="label">Nome / Razão Social</label>
+          <input id="nome" name="nome" type="text" placeholder="Empresa LTDA" class="input"/>
+        </div>
+      </div>
+
+      <!-- Auth method selector -->
+      <div>
+        <label class="label mb-2 block">Método de Autenticação</label>
+        <div class="flex gap-2">
+          <label class="auth-btn active" id="auth-cert-btn">
+            <input type="radio" name="auth_method" value="cert" checked class="hidden"/>
+            <span>🔐 Certificado Digital A1</span>
+          </label>
+          <label class="auth-btn" id="auth-login-btn">
+            <input type="radio" name="auth_method" value="login" class="hidden"/>
+            <span>🔑 Login e Senha</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- CERT fields -->
+      <div id="auth-cert-fields">
+        <div class="space-y-4">
+          <div>
+            <label class="label">Certificado Digital A1 (.pfx / .p12) <span class="text-red-400">*</span></label>
+            <input id="cert" name="cert" type="file" accept=".pfx,.p12" class="input"/>
+            <p class="text-xs text-gray-500 mt-1">Usado apenas durante o download — não é armazenado no servidor.</p>
+          </div>
+          <div>
+            <label class="label">Senha do Certificado <span class="text-red-400">*</span></label>
+            <input id="password" name="password" type="password" placeholder="••••••••" class="input"/>
+          </div>
+        </div>
+      </div>
+
+      <!-- LOGIN fields -->
+      <div id="auth-login-fields" class="hidden">
+        <div class="bg-blue-950/30 border border-blue-800/40 rounded-xl p-4 space-y-3">
+          <div class="flex items-center gap-2 text-xs text-blue-300 mb-1">
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            Credenciais de acesso ao portal
+            <a href="https://www.nfse.gov.br/EmissorNacional/Login" target="_blank"
+               class="underline hover:text-blue-200">nfse.gov.br</a>
+          </div>
+          <div>
+            <label class="label">CPF / CNPJ <span class="text-red-400">*</span></label>
+            <input id="portal_login" name="portal_login" type="text"
+              placeholder="000.000.000-00  ou  00.000.000/0001-00"
+              class="input" autocomplete="username"/>
+            <p class="text-xs text-gray-500 mt-1">Mesmo valor usado no campo "CPF/CNPJ" do portal</p>
+          </div>
+          <div>
+            <label class="label">Senha <span class="text-red-400">*</span></label>
+            <input id="portal_senha" name="portal_senha" type="password"
+              placeholder="••••••••" class="input"
+              autocomplete="current-password"/>
+          </div>
+          <p class="text-xs text-gray-400">
+            As mesmas credenciais usadas para entrar em
+            <span class="text-gray-300">nfse.gov.br/EmissorNacional/Login</span>
+          </p>
+        </div>
+      </div>
+
+      <!-- Tipo de NFS-e -->
+      <div>
+        <label class="label mb-2 block">Tipo de NFS-e</label>
+        <div class="flex gap-2 flex-wrap" id="tipo-group">
+          <label class="tipo-btn active" id="tipo-todas">
+            <input type="radio" name="tipo_nfse" value="todas" checked class="hidden"/>
+            <span>📋 Todas</span>
+          </label>
+          <label class="tipo-btn" id="tipo-emitidas">
+            <input type="radio" name="tipo_nfse" value="emitidas" class="hidden"/>
+            <span>📤 Somente Emitidas</span>
+          </label>
+          <label class="tipo-btn" id="tipo-recebidas">
+            <input type="radio" name="tipo_nfse" value="recebidas" class="hidden"/>
+            <span>📥 Somente Recebidas</span>
+          </label>
+        </div>
+        <p class="text-xs text-gray-500 mt-1.5">
+          O download busca todas as NFS-e e filtra na exportação — nenhuma nota é ignorada durante a consulta.
+        </p>
+      </div>
+
+      <!-- Period -->
+      <div>
+        <label class="label mb-2 block">Período</label>
+        <div class="grid grid-cols-2 gap-3 mb-2">
+          <div>
+            <span class="text-xs text-gray-500">De</span>
+            <input id="data_inicial" name="data_inicial" type="date" required class="input mt-1"/>
+          </div>
+          <div>
+            <span class="text-xs text-gray-500">Até</span>
+            <input id="data_final" name="data_final" type="date" required class="input mt-1"/>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button type="button" onclick="setPeriod('mes')"     class="chip">Este mês</button>
+          <button type="button" onclick="setPeriod('mes_ant')" class="chip">Mês anterior</button>
+          <button type="button" onclick="setPeriod('ano')"     class="chip">Este ano</button>
+          <button type="button" onclick="setPeriod('tudo')"    class="chip">Tudo</button>
+        </div>
+      </div>
+
+      <!-- Advanced -->
+      <details>
+        <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-300 select-none">▸ Opções avançadas</summary>
+        <div class="mt-3 grid grid-cols-2 gap-4">
+          <div>
+            <label class="label">NSU Inicial</label>
+            <input id="nsu_inicial" name="nsu_inicial" type="number" value="0" min="0" class="input"/>
+            <p class="text-xs text-gray-500 mt-1">0 = busca automática</p>
+          </div>
+          <div>
+            <label class="label">Ambiente</label>
+            <select id="ambiente" name="ambiente" class="input">
+              <option value="producao">Produção</option>
+              <option value="homologacao">Homologação</option>
+            </select>
+          </div>
+        </div>
+      </details>
+
+      <button id="btn" type="submit"
+        class="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed
+               text-white font-semibold py-3 rounded-xl transition text-sm flex items-center justify-center gap-2">
+        <svg id="btn-ico" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+        </svg>
+        <span id="btn-txt">Baixar NFS-e + XLSX</span>
+      </button>
+    </form>
+  </div>
+
+  <!-- Status -->
+  <div id="status" class="hidden rounded-xl border px-4 py-3 text-sm"></div>
+
+  <!-- Log detail (shown on error) -->
+  <div id="log-box" class="hidden bg-gray-900 border border-gray-700 rounded-xl p-4">
+    <div class="flex items-center justify-between mb-2">
+      <span class="text-xs font-semibold text-gray-400">Log de execução</span>
+      <button onclick="$('log-box').classList.add('hidden')" class="text-xs text-gray-500 hover:text-gray-300">✕</button>
+    </div>
+    <pre id="log-lines" class="text-xs text-gray-300 whitespace-pre-wrap break-all max-h-64 overflow-y-auto"></pre>
+  </div>
+
+  <p class="text-center text-xs text-gray-600">
+    O ZIP gerado contém os XMLs das NFS-e + uma planilha XLSX para análise.
+  </p>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     TAB: CLIENTES
+══════════════════════════════════════════════════════ -->
+<div id="page-clientes" class="hidden max-w-4xl mx-auto p-6">
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+    <!-- Client list -->
+    <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-semibold text-white">Clientes Cadastrados</h2>
+        <button onclick="newClientForm()"
+          class="text-xs bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded-lg font-medium transition">
+          + Novo Cliente
+        </button>
+      </div>
+      <div id="client-list" class="space-y-2 max-h-[480px] overflow-y-auto pr-1">
+        <p class="text-sm text-gray-500 text-center py-6">Nenhum cliente cadastrado.</p>
+      </div>
+    </div>
+
+    <!-- Client form -->
+    <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+      <h2 id="form-title" class="font-semibold text-white mb-4">Novo Cliente</h2>
+      <div class="space-y-4">
+        <input type="hidden" id="client-id"/>
+        <div>
+          <label class="label">Nome / Razão Social <span class="text-red-400">*</span></label>
+          <input id="c-nome" type="text" placeholder="Empresa LTDA" class="input"/>
+        </div>
+        <div>
+          <label class="label">CNPJ <span class="text-red-400">*</span></label>
+          <input id="c-cnpj" type="text" placeholder="00.000.000/0001-00" class="input"/>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="label">Inscrição Municipal</label>
+            <input id="c-im" type="text" class="input"/>
+          </div>
+          <div>
+            <label class="label">Cód. IBGE Município</label>
+            <input id="c-mun" type="text" placeholder="3550308" class="input"/>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="label">Ambiente padrão</label>
+            <select id="c-amb" class="input">
+              <option value="producao">Produção</option>
+              <option value="homologacao">Homologação</option>
+            </select>
+          </div>
+          <div>
+            <label class="label">NSU padrão</label>
+            <input id="c-nsu" type="number" value="0" min="0" class="input"/>
+          </div>
+        </div>
+        <p class="text-xs text-gray-500">
+          Certificado e senha NÃO são salvos — você os informa na hora do download.
+        </p>
+        <div class="flex gap-3 pt-1">
+          <button onclick="saveClientForm()"
+            class="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-xl text-sm transition">
+            Salvar Cliente
+          </button>
+          <button onclick="deleteClient()" id="btn-delete"
+            class="hidden px-4 bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-600/30 rounded-xl text-sm transition">
+            Excluir
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── STYLES ──────────────────────────────────────────── -->
+<style>
+  .label  { display:block;font-size:.75rem;font-weight:500;color:#9ca3af;margin-bottom:.25rem }
+  .input  { width:100%;background:#1f2937;border:1px solid #374151;border-radius:.5rem;
+            padding:.5rem .75rem;font-size:.875rem;color:#f3f4f6;outline:none;transition:.15s }
+  .input:focus  { border-color:#3b82f6 }
+  .chip   { font-size:.75rem;background:#1f2937;border:1px solid #374151;
+            padding:.25rem .75rem;border-radius:.5rem;transition:.15s }
+  .chip:hover { background:#374151 }
+  .tab-btn       { color:#6b7280 }
+  .tab-btn.active{ background:#1f2937;color:#fff }
+  .client-card   { background:#111827;border:1px solid #1f2937;border-radius:.75rem;
+                   padding:.75rem 1rem;cursor:pointer;transition:.15s }
+  .client-card:hover { border-color:#3b82f6 }
+  .client-card.selected { border-color:#3b82f6;background:#1e3a5f }
+  /* Auth + Tipo radio buttons — shared style */
+  .auth-btn, .tipo-btn {
+    display:inline-flex;align-items:center;gap:.35rem;
+    cursor:pointer;padding:.4rem 1rem;border-radius:.6rem;font-size:.8rem;font-weight:500;
+    background:#1f2937;border:1px solid #374151;color:#9ca3af;transition:all .15s;
+    user-select:none;
+  }
+  .auth-btn:hover, .tipo-btn:hover { border-color:#4b5563;color:#e5e7eb; }
+  .tipo-btn.active { background:#1e3a5f;border-color:#3b82f6;color:#93c5fd; }
+  .auth-btn.active { background:#14532d;border-color:#16a34a;color:#86efac; }
+</style>
+
+<script>
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const fmtCNPJ = v => {
+  v = v.replace(/\D/g,'').slice(0,14);
+  if(v.length>12) v=v.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/,'$1.$2.$3/$4-$5');
+  else if(v.length>8) v=v.replace(/^(\d{2})(\d{3})(\d{3})(\d+)$/,'$1.$2.$3/$4');
+  else if(v.length>5) v=v.replace(/^(\d{2})(\d{3})(\d+)$/,'$1.$2.$3');
+  else if(v.length>2) v=v.replace(/^(\d{2})(\d+)$/,'$1.$2');
+  return v;
+};
+const stripCNPJ = v => v.replace(/\D/g,'');
+
+// ── Tab switching ──────────────────────────────────────────────────────────────
+function showTab(tab) {
+  ['download','clientes'].forEach(t => {
+    $(`page-${t}`).classList.toggle('hidden', t !== tab);
+    $(`tab-${t}`).classList.toggle('active', t === tab);
+  });
+  if(tab === 'download') refreshClientSelect();
+  if(tab === 'clientes') renderClientList();
+}
+
+// ── Period shortcuts ───────────────────────────────────────────────────────────
+function setPeriod(p) {
+  const t = new Date(), y=t.getFullYear(), m=t.getMonth();
+  let ini, fim = t.toISOString().slice(0,10);
+  if(p==='mes')     { ini=new Date(y,m,1).toISOString().slice(0,10); }
+  else if(p==='mes_ant') {
+    const last=new Date(y,m,0);
+    fim=last.toISOString().slice(0,10);
+    ini=new Date(last.getFullYear(),last.getMonth(),1).toISOString().slice(0,10);
+  }
+  else if(p==='ano')  { ini=new Date(y,0,1).toISOString().slice(0,10); }
+  else { ini='2023-01-01'; fim=new Date(y,11,31).toISOString().slice(0,10); }
+  $('data_inicial').value=ini; $('data_final').value=fim;
+}
+
+// ── Auth method toggle ─────────────────────────────────────────────────────────
+(function setupAuth() {
+  const certBtn  = $('auth-cert-btn');
+  const loginBtn = $('auth-login-btn');
+  const certF    = $('auth-cert-fields');
+  const loginF   = $('auth-login-fields');
+  const certFile = $('cert');
+  const certPwd  = $('password');
+  const plLogin  = $('portal_login');
+  const plSenha  = $('portal_senha');
+
+  function setAuthMode(mode) {
+    const isCert = mode === 'cert';
+    certBtn.classList.toggle('active', isCert);
+    loginBtn.classList.toggle('active', !isCert);
+    certBtn.querySelector('input').checked = isCert;
+    loginBtn.querySelector('input').checked = !isCert;
+
+    certF.classList.toggle('hidden', !isCert);
+    loginF.classList.toggle('hidden', isCert);
+
+    // required attributes — only validate visible fields
+    certFile.required = isCert;
+    certPwd.required  = isCert;
+    plLogin.required  = !isCert;
+    plSenha.required  = !isCert;
+  }
+
+  certBtn.addEventListener('click',  () => setAuthMode('cert'));
+  loginBtn.addEventListener('click', () => setAuthMode('login'));
+
+  // Init
+  setAuthMode('cert');
+})();
+
+// ── Tipo radio buttons ─────────────────────────────────────────────────────────
+(function setupTipo() {
+  const btns = document.querySelectorAll('.tipo-btn');
+  const labels = { todas:'Baixar NFS-e + XLSX', emitidas:'Baixar NFS-e Emitidas + XLSX', recebidas:'Baixar NFS-e Recebidas + XLSX' };
+  btns.forEach(label => {
+    const radio = label.querySelector('input[type=radio]');
+    label.addEventListener('click', () => {
+      btns.forEach(b => b.classList.remove('active'));
+      label.classList.add('active');
+      radio.checked = true;
+      $('btn-txt').textContent = labels[radio.value] || labels.todas;
+    });
+  });
+})();
+
+// ── CNPJ mask on download form ─────────────────────────────────────────────────
+$('cnpj').addEventListener('input', function(){ this.value=fmtCNPJ(this.value); });
+$('c-cnpj').addEventListener('input', function(){ this.value=fmtCNPJ(this.value); });
+
+// ── Status display ─────────────────────────────────────────────────────────────
+function showStatus(type, msg) {
+  const el=$('status'), colors={
+    info:'bg-blue-900/40 border-blue-700 text-blue-300',
+    error:'bg-red-900/40 border-red-700 text-red-300',
+    success:'bg-green-900/40 border-green-700 text-green-300'
+  };
+  el.className=`rounded-xl border px-4 py-3 text-sm ${colors[type]}`;
+  el.textContent=msg;
+  el.classList.remove('hidden');
+  el.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+// ── Download form submit ───────────────────────────────────────────────────────
+function getTipoLabel() {
+  const v = (document.querySelector('input[name=tipo_nfse]:checked')||{}).value || 'todas';
+  return {todas:'Baixar NFS-e + XLSX', emitidas:'Baixar NFS-e Emitidas + XLSX', recebidas:'Baixar NFS-e Recebidas + XLSX'}[v];
+}
+function setLoading(on) {
+  $('btn').disabled=on;
+  $('btn-txt').textContent=on?'Processando… (pode levar minutos)':getTipoLabel();
+  $('btn-ico').innerHTML=on
+    ?'<circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25"/><path fill="currentColor" class="opacity-75" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>'
+    :'<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>';
+  if(on) $('btn-ico').classList.add('spin'); else $('btn-ico').classList.remove('spin');
+}
+
+$('form').addEventListener('submit', async e => {
+  e.preventDefault();
+  $('status').classList.add('hidden');
+  $('log-box').classList.add('hidden');
+  setLoading(true);
+  showStatus('info','Conectando à API do Sistema Nacional NFS-e…');
+
+  const fd = new FormData($('form'));
+  fd.set('cnpj', stripCNPJ(fd.get('cnpj')));
+
+  try {
+    const resp = await fetch('/api/download', {method:'POST', body:fd});
+    if(!resp.ok) {
+      const err = await resp.json().catch(()=>({error:`HTTP ${resp.status}`}));
+      showStatus('error', err.error||'Erro desconhecido.');
+      showLog(err.log);
+      return;
+    }
+    const blob = await resp.blob();
+    const cd = resp.headers.get('Content-Disposition')||'';
+    const m = cd.match(/filename="?([^"]+)"?/);
+    const fname = m?m[1]:'NFS-e.zip';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href=url; a.download=fname; a.click();
+    URL.revokeObjectURL(url);
+    showStatus('success',`✓ Download concluído: ${fname}`);
+  } catch(err) {
+    showStatus('error',`Erro de conexão: ${err.message}`);
+  } finally {
+    setLoading(false);
+  }
+});
+
+function showLog(lines) {
+  if(!lines || !lines.length) return;
+  $('log-lines').textContent = Array.isArray(lines) ? lines.join('\n') : String(lines);
+  $('log-box').classList.remove('hidden');
+}
+
+// ════════════════════════════════════════════════════════
+//   CLIENT MANAGER  (localStorage)
+// ════════════════════════════════════════════════════════
+function getClients() {
+  return JSON.parse(localStorage.getItem('nfse_clients')||'[]');
+}
+function saveClients(list) {
+  localStorage.setItem('nfse_clients', JSON.stringify(list));
+}
+function uuid() {
+  return Date.now().toString(36)+Math.random().toString(36).slice(2);
+}
+
+function renderClientList() {
+  const list = getClients();
+  const el = $('client-list');
+  if(!list.length) {
+    el.innerHTML='<p class="text-sm text-gray-500 text-center py-6">Nenhum cliente cadastrado.<br>Clique em "+ Novo Cliente".</p>';
+    return;
+  }
+  el.innerHTML = list.map(c=>`
+    <div class="client-card" onclick="editClient('${c.id}')">
+      <div class="font-medium text-sm text-white">${c.nome||'(sem nome)'}</div>
+      <div class="text-xs text-gray-400 mt-0.5">${fmtCNPJ(c.cnpj||'')} · ${c.ambiente||'producao'}</div>
+    </div>
+  `).join('');
+}
+
+function newClientForm() {
+  $('client-id').value='';
+  $('c-nome').value='';
+  $('c-cnpj').value='';
+  $('c-im').value='';
+  $('c-mun').value='';
+  $('c-amb').value='producao';
+  $('c-nsu').value='0';
+  $('form-title').textContent='Novo Cliente';
+  $('btn-delete').classList.add('hidden');
+}
+
+function editClient(id) {
+  const c = getClients().find(x=>x.id===id);
+  if(!c) return;
+  $('client-id').value=c.id;
+  $('c-nome').value=c.nome||'';
+  $('c-cnpj').value=fmtCNPJ(c.cnpj||'');
+  $('c-im').value=c.inscricao_municipal||'';
+  $('c-mun').value=c.municipio_codigo||'';
+  $('c-amb').value=c.ambiente||'producao';
+  $('c-nsu').value=c.nsu_padrao||0;
+  $('form-title').textContent='Editar Cliente';
+  $('btn-delete').classList.remove('hidden');
+  document.querySelectorAll('.client-card').forEach(el=>{
+    el.classList.toggle('selected', el.onclick.toString().includes(id));
+  });
+}
+
+function saveClientForm() {
+  const nome = $('c-nome').value.trim();
+  const cnpj = stripCNPJ($('c-cnpj').value);
+  if(!nome||!cnpj) { alert('Preencha Nome e CNPJ.'); return; }
+
+  const list = getClients();
+  const existing_id = $('client-id').value;
+  const client = {
+    id: existing_id || uuid(),
+    nome,
+    cnpj,
+    inscricao_municipal: $('c-im').value.trim(),
+    municipio_codigo:    $('c-mun').value.trim(),
+    ambiente:            $('c-amb').value,
+    nsu_padrao:          parseInt($('c-nsu').value||'0'),
+  };
+
+  const idx = list.findIndex(x=>x.id===client.id);
+  if(idx>=0) list[idx]=client; else list.push(client);
+  saveClients(list);
+  renderClientList();
+  newClientForm();
+}
+
+function deleteClient() {
+  const id = $('client-id').value;
+  if(!id||!confirm('Excluir este cliente?')) return;
+  saveClients(getClients().filter(x=>x.id!==id));
+  renderClientList();
+  newClientForm();
+}
+
+// Fill download form from selected client
+function fillFromClient() {
+  const id = $('client-select').value;
+  if(!id) return;
+  const c = getClients().find(x=>x.id===id);
+  if(!c) return;
+  $('cnpj').value = fmtCNPJ(c.cnpj||'');
+  $('nome').value = c.nome||'';
+  $('ambiente').value = c.ambiente||'producao';
+  $('nsu_inicial').value = c.nsu_padrao||0;
+}
+
+function refreshClientSelect() {
+  const sel = $('client-select');
+  const prev = sel.value;
+  const list = getClients();
+  sel.innerHTML = '<option value="">— Selecione um cliente salvo (opcional) —</option>';
+  list.forEach(c=>{
+    const opt=document.createElement('option');
+    opt.value=c.id;
+    opt.textContent=`${c.nome} (${fmtCNPJ(c.cnpj)})`;
+    sel.appendChild(opt);
+  });
+  if(prev) sel.value=prev;
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(function init() {
+  const t=new Date(), y=t.getFullYear(), m=t.getMonth();
+  $('data_inicial').value=new Date(y,m,1).toISOString().slice(0,10);
+  $('data_final').value=t.toISOString().slice(0,10);
+  showTab('download');
+  refreshClientSelect();
+})();
+</script>
+</body>
+</html>

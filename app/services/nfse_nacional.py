@@ -13,7 +13,7 @@ import base64
 import json
 import time
 import xml.etree.ElementTree as ET
-from datetime import date
+from datetime import date, timedelta
 from typing import List, Tuple, Callable
 
 import requests
@@ -115,8 +115,7 @@ class NfseNacionalClient:
         # ── Phase 2: sequential download ───────────────────────────────────
         results: List[Tuple[str, str]] = []
         iteracoes = 0
-        batches_apos_periodo = 0
-
+        batches_apos_periodo = 0   # lotes consecutivos 100% após data_final
         notas_apos_periodo = 0
 
         while iteracoes < MAX_ITERATIONS:
@@ -139,15 +138,28 @@ class NfseNacionalClient:
 
             if datas_no_lote:
                 log(f"  [NSU {nsu}→{prox_nsu-1}:  {min(datas_no_lote)} a {max(datas_no_lote)}  |  acumulado: {len(results)}]")
+                # Early-exit: se todos os documentos do lote são claramente após data_final,
+                # contamos lotes consecutivos. Após 5 lotes assim, paramos para evitar
+                # timeout (notas podem chegar levemente fora de ordem, mas não por semanas).
+                min_dt = min(datas_no_lote)
+                if all(d > data_final for d in datas_no_lote):
+                    batches_apos_periodo += 1
+                    if batches_apos_periodo >= 5 or min_dt > data_final + timedelta(days=90):
+                        log(
+                            f"  Lotes consecutivos após o período ({batches_apos_periodo}x, "
+                            f"mínimo {min_dt}). Finalizando busca."
+                        )
+                        break
+                else:
+                    batches_apos_periodo = 0   # reset se encontrou algum doc no período
 
-            # Só para quando a API sinaliza fim real — nunca por data.
-            # Notas podem chegar fora de ordem no sistema nacional.
+            # Só para quando a API sinaliza fim real — nunca por data isolada.
             if fim or prox_nsu == nsu:
                 log(f"  Consulta concluída (fim da fila). Total: {len(results)} nota(s).")
                 break
 
             nsu = prox_nsu
-            time.sleep(5)
+            time.sleep(1)
 
         log(f"  ({notas_apos_periodo} nota(s) fora do período ignorada(s))")
         return results
@@ -167,10 +179,10 @@ class NfseNacionalClient:
             return max(datas) if datas else None
 
         # Step 1: exponential probe to find upper bound
-        nsu_low, nsu_high = 0, 500
+        nsu_low, nsu_high = 0, 1000
         while True:
             d = data_do_nsu(nsu_high)
-            time.sleep(3)
+            time.sleep(0.5)
             if d is None:
                 # Reached end — data_alvo is beyond all docs, start from last known low
                 break
@@ -186,7 +198,7 @@ class NfseNacionalClient:
         while nsu_high - nsu_low > 200:
             mid = (nsu_low + nsu_high) // 2
             d = data_do_nsu(mid)
-            time.sleep(3)
+            time.sleep(0.5)
             if d is None or d >= data_alvo:
                 nsu_high = mid
             else:

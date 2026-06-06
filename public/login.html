@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Entrar — geradorxml</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{
+      font-family:'Inter',system-ui,sans-serif;
+      background:#040d1a;color:#e2e8f0;min-height:100vh;
+      display:flex;align-items:center;justify-content:center;
+      padding:1rem;
+    }
+    a{color:#22c55e;text-decoration:none}
+    a:hover{text-decoration:underline}
+
+    .card{
+      width:100%;max-width:420px;
+      background:#0d1b2e;border:1px solid #1e3a5f;
+      border-radius:1.25rem;padding:2.5rem 2rem;
+    }
+
+    .logo{display:flex;align-items:center;gap:.75rem;margin-bottom:2rem}
+    .logo-ico{
+      width:2.5rem;height:2.5rem;background:#22c55e;
+      border-radius:.625rem;display:flex;align-items:center;
+      justify-content:center;font-weight:700;font-size:1rem;color:#040d1a;
+    }
+    .logo-name{font-size:1.1rem;font-weight:700;color:#fff}
+    .logo-sub{font-size:.7rem;color:#64748b;margin-top:.1rem}
+
+    h1{font-size:1.4rem;font-weight:700;color:#fff;margin-bottom:.4rem}
+    .subtitle{font-size:.85rem;color:#64748b;margin-bottom:2rem}
+
+    label{display:block;font-size:.75rem;font-weight:500;color:#94a3b8;margin-bottom:.35rem}
+    input{
+      width:100%;background:#0a1628;border:1px solid #1e3a5f;
+      border-radius:.625rem;padding:.625rem .875rem;font-size:.875rem;
+      color:#e2e8f0;outline:none;transition:.15s;
+    }
+    input:focus{border-color:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,.1)}
+    .field{margin-bottom:1.1rem}
+
+    .btn{
+      width:100%;background:#22c55e;color:#040d1a;font-weight:700;
+      font-size:.9rem;padding:.75rem;border:none;border-radius:.75rem;
+      cursor:pointer;transition:.15s;display:flex;align-items:center;
+      justify-content:center;gap:.5rem;
+    }
+    .btn:hover{background:#16a34a}
+    .btn:disabled{background:#334155;color:#64748b;cursor:not-allowed}
+
+    .err{
+      background:#450a0a;border:1px solid #7f1d1d;color:#fca5a5;
+      border-radius:.625rem;padding:.75rem 1rem;font-size:.82rem;
+      margin-bottom:1rem;display:none;
+    }
+    .err.show{display:block}
+
+    .footer-txt{text-align:center;font-size:.8rem;color:#475569;margin-top:1.5rem}
+    .spin{animation:spin .8s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <div class="logo-ico">GX</div>
+    <div>
+      <div class="logo-name">geradorxml</div>
+      <div class="logo-sub">Download automático de NFS-e</div>
+    </div>
+  </div>
+
+  <h1>Entrar na conta</h1>
+  <p class="subtitle">Bem-vindo de volta.</p>
+
+  <div id="err" class="err"></div>
+
+  <form id="form">
+    <div class="field">
+      <label for="email">E-mail</label>
+      <input id="email" type="email" placeholder="contador@escritorio.com.br"
+             autocomplete="email" required/>
+    </div>
+    <div class="field">
+      <label for="senha">Senha</label>
+      <input id="senha" type="password" placeholder="••••••••"
+             autocomplete="current-password" required/>
+    </div>
+
+    <button id="btn" type="submit" class="btn">
+      <svg id="ico" xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/>
+      </svg>
+      <span id="btn-txt">Entrar</span>
+    </button>
+  </form>
+
+  <p class="footer-txt">
+    Não tem conta? <a href="/register">Criar conta grátis — trial 24h</a>
+  </p>
+</div>
+
+<script>
+const TOKEN_KEY = 'gxml_token';
+
+// Already logged in?
+if (localStorage.getItem(TOKEN_KEY)) {
+  window.location.replace('/app');
+}
+
+const form   = document.getElementById('form');
+const btn    = document.getElementById('btn');
+const btnTxt = document.getElementById('btn-txt');
+const ico    = document.getElementById('ico');
+const errEl  = document.getElementById('err');
+
+function showErr(msg) {
+  errEl.textContent = msg;
+  errEl.classList.add('show');
+}
+function hideErr() { errEl.classList.remove('show'); }
+
+function setLoading(on) {
+  btn.disabled = on;
+  btnTxt.textContent = on ? 'Entrando…' : 'Entrar';
+  ico.innerHTML = on
+    ? '<circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" opacity=".25"/><path fill="currentColor" opacity=".75" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>'
+    : '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/>';
+  if (on) ico.classList.add('spin'); else ico.classList.remove('spin');
+}
+
+form.addEventListener('submit', async e => {
+  e.preventDefault();
+  hideErr();
+  setLoading(true);
+
+  const email = document.getElementById('email').value.trim();
+  const senha = document.getElementById('senha').value;
+
+  try {
+    const resp = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, senha })
+    });
+
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      showErr(data.error || 'Erro ao entrar. Tente novamente.');
+      return;
+    }
+
+    localStorage.setItem(TOKEN_KEY, data.token);
+    if (data.user) {
+      localStorage.setItem('gxml_user', JSON.stringify(data.user));
+    }
+    window.location.replace('/app');
+
+  } catch (err) {
+    showErr('Erro de conexão. Verifique sua internet e tente novamente.');
+  } finally {
+    setLoading(false);
+  }
+});
+</script>
+</body>
+</html>

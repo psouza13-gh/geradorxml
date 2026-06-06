@@ -29,10 +29,10 @@
 <body class="bg-gray-950 text-gray-100 min-h-screen">
 
 <!-- ── TOP BAR ────────────────────────────────────────── -->
-<header class="border-b border-gray-800 px-6 py-3 flex items-center justify-between">
+<header class="border-b border-gray-800 px-6 py-3 flex items-center justify-between gap-3 flex-wrap">
   <div class="flex items-center gap-3">
-    <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-sm font-bold">NF</div>
-    <span class="font-semibold text-white">NFS-e Downloader</span>
+    <div class="w-8 h-8 bg-green-600 rounded-lg flex items-center justify-center text-sm font-bold">GX</div>
+    <span class="font-semibold text-white">geradorxml</span>
     <span class="text-xs text-gray-500 hidden sm:block">Sistema Nacional NFS-e</span>
   </div>
   <div class="flex gap-2 text-sm">
@@ -41,7 +41,23 @@
     <button onclick="showTab('clientes')" id="tab-clientes"
       class="tab-btn px-4 py-1.5 rounded-lg font-medium transition">Clientes</button>
   </div>
+  <!-- User info -->
+  <div id="user-bar" class="hidden flex items-center gap-3 text-xs">
+    <span id="user-plano-badge"
+      class="px-2 py-1 rounded-md font-semibold uppercase tracking-wide"></span>
+    <span id="user-nome" class="text-gray-400 hidden sm:block"></span>
+    <span id="user-uso" class="text-gray-500 hidden md:block"></span>
+    <button onclick="logout()"
+      class="text-gray-500 hover:text-gray-300 transition px-2 py-1 rounded"
+      title="Sair">↩ Sair</button>
+  </div>
 </header>
+
+<!-- Trial warning banner -->
+<div id="trial-banner" class="hidden border-b border-yellow-700/50 bg-yellow-900/20 px-6 py-2 text-xs text-yellow-300 flex items-center justify-between gap-4">
+  <span id="trial-msg"></span>
+  <a href="/" class="font-semibold text-yellow-200 hover:text-white underline whitespace-nowrap">Ver planos →</a>
+</div>
 
 <!-- ══════════════════════════════════════════════════════
      TAB: BAIXAR NFS-e
@@ -461,9 +477,10 @@ $('form').addEventListener('submit', async e => {
   fd.set('cnpj', stripCNPJ(fd.get('cnpj')));
 
   try {
-    const resp = await fetch('/api/download', {method:'POST', body:fd});
+    const resp = await fetch('/api/download', {method:'POST', body:fd, headers: authHdrs()});
     if(!resp.ok) {
       const err = await resp.json().catch(()=>({error:`HTTP ${resp.status}`}));
+      if(resp.status === 401) { logout(); return; }
       showStatus('error', err.error||'Erro desconhecido.');
       showLog(err.log);
       return;
@@ -477,6 +494,7 @@ $('form').addEventListener('submit', async e => {
     a.href=url; a.download=fname; a.click();
     URL.revokeObjectURL(url);
     showStatus('success',`✓ Download concluído: ${fname}`);
+    loadUserInfo();  // refresh usage counter
   } catch(err) {
     showStatus('error',`Erro de conexão: ${err.message}`);
   } finally {
@@ -491,127 +509,257 @@ function showLog(lines) {
 }
 
 // ════════════════════════════════════════════════════════
-//   CLIENT MANAGER  (localStorage)
+//  AUTH
 // ════════════════════════════════════════════════════════
-function getClients() {
-  return JSON.parse(localStorage.getItem('nfse_clients')||'[]');
-}
-function saveClients(list) {
-  localStorage.setItem('nfse_clients', JSON.stringify(list));
-}
-function uuid() {
-  return Date.now().toString(36)+Math.random().toString(36).slice(2);
+const TOKEN_KEY = 'gxml_token';
+const USER_KEY  = 'gxml_user';
+
+function getToken()   { return localStorage.getItem(TOKEN_KEY); }
+function authHdrs()   { return { 'Authorization': 'Bearer ' + getToken() }; }
+function logout()     { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(USER_KEY); window.location.replace('/login'); }
+
+// ════════════════════════════════════════════════════════
+//  USER INFO
+// ════════════════════════════════════════════════════════
+const PLANO_COLORS = {
+  trial:   'bg-yellow-600/20 text-yellow-300',
+  starter: 'bg-blue-600/20 text-blue-300',
+  pro:     'bg-green-600/20 text-green-300',
+  office:  'bg-purple-600/20 text-purple-300',
+  bpo:     'bg-orange-600/20 text-orange-300',
+};
+
+function renderUserBar(user) {
+  if(!user) return;
+  const bar    = $('user-bar');
+  const badge  = $('user-plano-badge');
+  const nome   = $('user-nome');
+  const uso    = $('user-uso');
+  const banner = $('trial-banner');
+  const msg    = $('trial-msg');
+
+  bar.classList.remove('hidden');
+  bar.classList.add('flex');
+
+  const plano = (user.plano||'trial').toLowerCase();
+  badge.textContent = plano.toUpperCase();
+  badge.className = `px-2 py-1 rounded-md font-semibold uppercase tracking-wide ${PLANO_COLORS[plano]||PLANO_COLORS.starter}`;
+
+  nome.textContent = user.nome || user.email;
+
+  // Usage count
+  const cnpjsUsados = (user.uso_mensal||[]).length;
+  const limite = user.cnpj_limite;
+  if(limite != null) {
+    uso.textContent = limite === -1 ? `${cnpjsUsados} CNPJs este mês` : `${cnpjsUsados}/${limite} CNPJs este mês`;
+  }
+
+  // Trial banner
+  if(plano === 'trial') {
+    const exp = user.trial_expires_at ? new Date(user.trial_expires_at) : null;
+    const now = new Date();
+    if(exp && exp > now) {
+      const mins = Math.round((exp-now)/60000);
+      const hrs  = Math.floor(mins/60);
+      const rem  = mins % 60;
+      const timeStr = hrs > 0 ? `${hrs}h${rem > 0 ? rem+'min' : ''}` : `${mins} min`;
+      msg.textContent = `Trial ativo — ${timeStr} restantes · 1 CNPJ.`;
+    } else {
+      msg.textContent = `Seu trial expirou. Assine um plano para continuar baixando NFS-e.`;
+    }
+    banner.classList.remove('hidden');
+    banner.classList.add('flex');
+  }
 }
 
-function renderClientList() {
-  const list = getClients();
+async function loadUserInfo() {
+  try {
+    const resp = await fetch('/api/auth/me', { headers: authHdrs() });
+    if(resp.status === 401) { logout(); return null; }
+    const user = await resp.json();
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+    renderUserBar(user);
+    return user;
+  } catch(e) {
+    // Network error — use cached user if available
+    const cached = localStorage.getItem(USER_KEY);
+    if(cached) {
+      const user = JSON.parse(cached);
+      renderUserBar(user);
+      return user;
+    }
+    return null;
+  }
+}
+
+// ════════════════════════════════════════════════════════
+//   CLIENT MANAGER  (API-backed)
+// ════════════════════════════════════════════════════════
+
+// In-memory cache to avoid re-fetching on every render
+let _clientsCache = null;
+
+async function fetchClients(force=false) {
+  if(_clientsCache && !force) return _clientsCache;
+  try {
+    const resp = await fetch('/api/clients', { headers: authHdrs() });
+    if(resp.status === 401) { logout(); return []; }
+    const data = await resp.json();
+    _clientsCache = data.clients || [];
+    return _clientsCache;
+  } catch(e) {
+    return _clientsCache || [];
+  }
+}
+
+async function renderClientList() {
   const el = $('client-list');
+  el.innerHTML = '<p class="text-sm text-gray-500 text-center py-6">Carregando…</p>';
+  const list = await fetchClients(true);  // always fresh on tab switch
   if(!list.length) {
-    el.innerHTML='<p class="text-sm text-gray-500 text-center py-6">Nenhum cliente cadastrado.<br>Clique em "+ Novo Cliente".</p>';
+    el.innerHTML = '<p class="text-sm text-gray-500 text-center py-6">Nenhum cliente cadastrado.<br>Clique em "+ Novo Cliente".</p>';
     return;
   }
   el.innerHTML = list.map(c=>`
-    <div class="client-card" onclick="editClient('${c.id}')">
-      <div class="font-medium text-sm text-white">${c.nome||'(sem nome)'}</div>
-      <div class="text-xs text-gray-400 mt-0.5">${fmtCNPJ(c.cnpj||'')} · ${c.ambiente||'producao'}</div>
+    <div class="client-card${c.locked?' border-yellow-600/40':''}" onclick="editClient('${c.id}')">
+      <div class="font-medium text-sm text-white flex items-center gap-2">
+        ${escHtml(c.nome||'(sem nome)')}
+        ${c.locked ? '<span class="text-xs text-yellow-400 font-normal">🔒 trial</span>' : ''}
+      </div>
+      <div class="text-xs text-gray-400 mt-0.5">${fmtCNPJ(c.cnpj||'')}${c.municipio_nome?' · '+escHtml(c.municipio_nome):''}</div>
     </div>
   `).join('');
 }
 
-function newClientForm() {
-  $('client-id').value='';
-  $('c-nome').value='';
-  $('c-cnpj').value='';
-  $('c-im').value='';
-  $('c-mun').value='';
-  $('c-amb').value='producao';
-  $('c-nsu').value='0';
-  $('form-title').textContent='Novo Cliente';
-  $('btn-delete').classList.add('hidden');
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function editClient(id) {
-  const c = getClients().find(x=>x.id===id);
+function newClientForm() {
+  $('client-id').value = '';
+  $('c-nome').value    = '';
+  $('c-cnpj').value    = '';
+  $('c-im').value      = '';
+  $('c-mun').value     = '';
+  $('c-amb').value     = 'producao';
+  $('c-nsu').value     = '0';
+  $('form-title').textContent = 'Novo Cliente';
+  $('btn-delete').classList.add('hidden');
+  document.querySelectorAll('.client-card').forEach(el=>el.classList.remove('selected'));
+}
+
+async function editClient(id) {
+  const list = await fetchClients();
+  const c = list.find(x=>x.id===id);
   if(!c) return;
-  $('client-id').value=c.id;
-  $('c-nome').value=c.nome||'';
-  $('c-cnpj').value=fmtCNPJ(c.cnpj||'');
-  $('c-im').value=c.inscricao_municipal||'';
-  $('c-mun').value=c.municipio_codigo||'';
-  $('c-amb').value=c.ambiente||'producao';
-  $('c-nsu').value=c.nsu_padrao||0;
-  $('form-title').textContent='Editar Cliente';
-  $('btn-delete').classList.remove('hidden');
+  $('client-id').value = c.id;
+  $('c-nome').value    = c.nome || '';
+  $('c-cnpj').value    = fmtCNPJ(c.cnpj||'');
+  $('c-im').value      = '';  // not stored in DB
+  $('c-mun').value     = c.municipio_codigo || '';
+  $('c-amb').value     = 'producao';
+  $('c-nsu').value     = '0';
+  $('form-title').textContent = c.locked ? 'Ver Cliente (bloqueado)' : 'Editar Cliente';
+  $('btn-delete').classList.toggle('hidden', !!c.locked);
   document.querySelectorAll('.client-card').forEach(el=>{
-    el.classList.toggle('selected', el.onclick.toString().includes(id));
+    el.classList.toggle('selected', el.getAttribute('onclick')||'' === `editClient('${id}')`);
   });
 }
 
-function saveClientForm() {
+async function saveClientForm() {
   const nome = $('c-nome').value.trim();
   const cnpj = stripCNPJ($('c-cnpj').value);
   if(!nome||!cnpj) { alert('Preencha Nome e CNPJ.'); return; }
+  if(cnpj.length !== 14) { alert('CNPJ inválido — informe os 14 dígitos.'); return; }
 
-  const list = getClients();
-  const existing_id = $('client-id').value;
-  const client = {
-    id: existing_id || uuid(),
-    nome,
-    cnpj,
-    inscricao_municipal: $('c-im').value.trim(),
-    municipio_codigo:    $('c-mun').value.trim(),
-    ambiente:            $('c-amb').value,
-    nsu_padrao:          parseInt($('c-nsu').value||'0'),
-  };
+  const existingId         = $('client-id').value;
+  const municipio_codigo   = $('c-mun').value.trim();
+  const municipio_nome_val = '';   // not collected in this form
 
-  const idx = list.findIndex(x=>x.id===client.id);
-  if(idx>=0) list[idx]=client; else list.push(client);
-  saveClients(list);
-  renderClientList();
-  newClientForm();
+  const payload = { nome, cnpj, municipio_codigo, municipio_nome: municipio_nome_val };
+
+  try {
+    const url    = existingId ? `/api/clients/${existingId}` : '/api/clients';
+    const method = existingId ? 'PUT' : 'POST';
+    const resp   = await fetch(url, {
+      method,
+      headers: { ...authHdrs(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if(!resp.ok) { alert(data.error || 'Erro ao salvar cliente.'); return; }
+
+    _clientsCache = null;  // invalidate cache
+    await renderClientList();
+    await refreshClientSelect();
+    newClientForm();
+  } catch(e) {
+    alert('Erro de conexão. Tente novamente.');
+  }
 }
 
-function deleteClient() {
+async function deleteClient() {
   const id = $('client-id').value;
-  if(!id||!confirm('Excluir este cliente?')) return;
-  saveClients(getClients().filter(x=>x.id!==id));
-  renderClientList();
-  newClientForm();
+  if(!id || !confirm('Excluir este cliente?')) return;
+  try {
+    const resp = await fetch(`/api/clients/${id}`, {
+      method: 'DELETE',
+      headers: authHdrs(),
+    });
+    const data = await resp.json();
+    if(!resp.ok) { alert(data.error || 'Erro ao excluir cliente.'); return; }
+
+    _clientsCache = null;
+    await renderClientList();
+    await refreshClientSelect();
+    newClientForm();
+  } catch(e) {
+    alert('Erro de conexão. Tente novamente.');
+  }
 }
 
 // Fill download form from selected client
-function fillFromClient() {
+async function fillFromClient() {
   const id = $('client-select').value;
   if(!id) return;
-  const c = getClients().find(x=>x.id===id);
+  const list = await fetchClients();
+  const c = list.find(x=>x.id===id);
   if(!c) return;
-  $('cnpj').value = fmtCNPJ(c.cnpj||'');
-  $('nome').value = c.nome||'';
-  $('ambiente').value = c.ambiente||'producao';
-  $('nsu_inicial').value = c.nsu_padrao||0;
+  $('cnpj').value         = fmtCNPJ(c.cnpj||'');
+  $('nome').value         = c.nome||'';
+  $('ambiente').value     = 'producao';
+  $('nsu_inicial').value  = 0;
 }
 
-function refreshClientSelect() {
-  const sel = $('client-select');
+async function refreshClientSelect() {
+  const sel  = $('client-select');
   const prev = sel.value;
-  const list = getClients();
+  const list = await fetchClients();
   sel.innerHTML = '<option value="">— Selecione um cliente salvo (opcional) —</option>';
   list.forEach(c=>{
-    const opt=document.createElement('option');
-    opt.value=c.id;
-    opt.textContent=`${c.nome} (${fmtCNPJ(c.cnpj)})`;
+    const opt = document.createElement('option');
+    opt.value       = c.id;
+    opt.textContent = `${c.nome} (${fmtCNPJ(c.cnpj)})`;
     sel.appendChild(opt);
   });
-  if(prev) sel.value=prev;
+  if(prev) sel.value = prev;
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-(function init() {
+(async function init() {
+  // Auth guard
+  const token = getToken();
+  if(!token) { window.location.replace('/login'); return; }
+
+  // Set default dates
   const t=new Date(), y=t.getFullYear(), m=t.getMonth();
-  $('data_inicial').value=new Date(y,m,1).toISOString().slice(0,10);
-  $('data_final').value=t.toISOString().slice(0,10);
+  $('data_inicial').value = new Date(y,m,1).toISOString().slice(0,10);
+  $('data_final').value   = t.toISOString().slice(0,10);
+
   showTab('download');
-  refreshClientSelect();
+  refreshClientSelect();   // non-blocking: show quickly from cache
+
+  loadUserInfo();           // load user info in background
 })();
 </script>
 </body>

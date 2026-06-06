@@ -18,8 +18,12 @@ from app.services.cert_handler import export_to_pem_files, get_cert_info
 from app.services.nfse_nacional import NfseNacionalClient
 from app.services.nfse_login import autenticar_login
 from app.services import cert_handler as _ch
+from app.services.auth_service import verify_token
+from app.services.subscription_service import verificar_e_registrar_download
 
 app = Flask(__name__)
+
+MAX_CERT_BYTES = 1 * 1024 * 1024  # 1 MB
 
 
 # ── NFS-e XML parser ─────────────────────────────────────────────────────────
@@ -225,6 +229,21 @@ def download():
     if len(cnpj) != 14:
         return jsonify({"error": "CNPJ inválido. Informe os 14 dígitos."}), 400
 
+    # ── Auth check ──────────────────────────────────────────────────────────────
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return jsonify({"error": "Autenticação necessária."}), 401
+    jwt_payload = verify_token(auth_header[7:])
+    if not jwt_payload:
+        return jsonify({"error": "Token inválido ou expirado. Faça login novamente."}), 401
+
+    user_id = jwt_payload["sub"]
+
+    # ── Subscription / trial check ──────────────────────────────────────────────
+    allowed, msg = verificar_e_registrar_download(user_id, cnpj)
+    if not allowed:
+        return jsonify({"error": msg}), 403
+
     try:
         data_ini = date.fromisoformat(data_ini_s)
         data_fim = date.fromisoformat(data_fim_s)
@@ -263,8 +282,13 @@ def download():
 
             password = request.form.get("password", "")
 
+            # ── File size guard ─────────────────────────────────────────────
+            cert_bytes = cert_file.read()
+            if len(cert_bytes) > MAX_CERT_BYTES:
+                return jsonify({"error": "Certificado muito grande (máx. 1 MB)."}), 400
+
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pfx", prefix="nfse_up_")
-            tmp.write(cert_file.read())
+            tmp.write(cert_bytes)
             tmp.close()
             tmp_cert_path = tmp.name
 
@@ -272,8 +296,8 @@ def download():
                 info = get_cert_info(tmp_cert_path, password)
                 if info.get("vencido"):
                     return jsonify({"error": f"Certificado vencido em {info['validade']}."}), 400
-            except Exception as e:
-                return jsonify({"error": f"Certificado inválido ou senha incorreta: {e}"}), 400
+            except Exception:
+                return jsonify({"error": "Certificado inválido ou senha incorreta."}), 400
 
             client = NfseNacionalClient(
                 cnpj=cnpj, cert_path=tmp_cert_path,

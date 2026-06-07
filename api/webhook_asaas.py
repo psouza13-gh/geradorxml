@@ -96,7 +96,10 @@ def webhook():
                SET plano = %s,
                    cnpj_limite = %s,
                    status = 'ativo',
-                   trial_expires_at = NULL
+                   trial_expires_at = NULL,
+                   plano_origem = 'asaas',
+                   vitalicio = FALSE,
+                   acesso_expires_at = NULL
              WHERE id = %s
             """,
             (plano, limite, user_id),

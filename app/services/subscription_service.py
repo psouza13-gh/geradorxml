@@ -42,7 +42,11 @@ def verificar_e_registrar_download(user_id: str, cnpj: str) -> tuple[bool, str]:
         (False, "<message>")   — not allowed; message shown to the user
     """
     user = execute(
-        "SELECT plano, status, trial_expires_at, trial_locked_cnpj FROM users WHERE id = %s",
+        """
+        SELECT plano, status, trial_expires_at, trial_locked_cnpj,
+               vitalicio, acesso_expires_at, plano_origem
+          FROM users WHERE id = %s
+        """,
         (user_id,),
         fetch="one",
     )
@@ -59,7 +63,27 @@ def verificar_e_registrar_download(user_id: str, cnpj: str) -> tuple[bool, str]:
     if status == "suspenso":
         return False, "Sua conta está suspensa por falta de pagamento. Atualize o pagamento para continuar."
 
+    if status == "congelado":
+        return False, "Sua conta está temporariamente congelada pelo administrador. Entre em contato com o suporte."
+
     now = datetime.now(timezone.utc)
+
+    # ── Admin-granted temporary access: auto-expire ───────────────────────
+    if not user.get("vitalicio") and (user.get("plano_origem") == "admin_temporario"):
+        acesso_expires = user.get("acesso_expires_at")
+        if acesso_expires:
+            if acesso_expires.tzinfo is None:
+                acesso_expires = acesso_expires.replace(tzinfo=timezone.utc)
+            if now > acesso_expires:
+                execute(
+                    "UPDATE users SET status = 'suspenso' WHERE id = %s",
+                    (user_id,),
+                )
+                return (
+                    False,
+                    "Seu acesso temporário concedido pelo administrador expirou. "
+                    "Entre em contato com o suporte para renovar.",
+                )
 
     if plano == "trial":
         # ── Trial expiry check ─────────────────────────────────────────────

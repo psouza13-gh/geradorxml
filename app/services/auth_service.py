@@ -87,7 +87,8 @@ def get_user_by_id(user_id: str) -> dict | None:
         SELECT id, nome, email, password_hash,
                plano, cnpj_limite, status,
                trial_expires_at, trial_locked_cnpj,
-               asaas_customer_id, created_at
+               asaas_customer_id, is_admin, vitalicio,
+               acesso_expires_at, plano_origem, created_at
         FROM users WHERE id = %s
         """,
         (user_id,),

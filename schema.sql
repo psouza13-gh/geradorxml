@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS users (
     -- Subscription state
     plano               TEXT NOT NULL DEFAULT 'trial',   -- trial | starter | pro | office | bpo
     cnpj_limite         INT  NOT NULL DEFAULT 1,         -- max CNPJs/month (-1 = unlimited)
-    status              TEXT NOT NULL DEFAULT 'ativo',   -- ativo | suspenso | cancelado
+    status              TEXT NOT NULL DEFAULT 'ativo',   -- ativo | suspenso | cancelado | congelado
 
     -- Trial
     trial_expires_at    TIMESTAMPTZ,
@@ -21,6 +21,13 @@ CREATE TABLE IF NOT EXISTS users (
 
     -- ASAAS
     asaas_customer_id   TEXT,
+
+    -- Super admin / manual subscription management
+    is_admin            BOOLEAN NOT NULL DEFAULT FALSE,
+    vitalicio           BOOLEAN NOT NULL DEFAULT FALSE,  -- TRUE = lifetime access (no billing/expiry)
+    acesso_expires_at   TIMESTAMPTZ,                     -- expiry of an admin-granted temporary access
+    plano_origem        TEXT NOT NULL DEFAULT 'trial',   -- trial | asaas | admin_temporario | admin_vitalicio
+    status_anterior     TEXT,                            -- status saved before freezing (to restore on unfreeze)
 
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -44,6 +44,9 @@ def _user_json(user: dict, with_uso: bool = False) -> dict:
         "status":            user["status"],
         "trial_expires_at":  user["trial_expires_at"].isoformat() if user.get("trial_expires_at") else None,
         "trial_locked_cnpj": user.get("trial_locked_cnpj"),
+        "is_admin":          bool(user.get("is_admin")),
+        "vitalicio":         bool(user.get("vitalicio")),
+        "acesso_expires_at": user["acesso_expires_at"].isoformat() if user.get("acesso_expires_at") else None,
     }
     if with_uso:
         d["uso_mensal"] = get_uso_mensal(str(user["id"]))

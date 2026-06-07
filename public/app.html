@@ -47,6 +47,7 @@
       class="px-2 py-1 rounded-md font-semibold uppercase tracking-wide"></span>
     <span id="user-nome" class="text-gray-400 hidden sm:block"></span>
     <span id="user-uso" class="text-gray-500 hidden md:block"></span>
+    <a id="admin-link" href="/admin" class="hidden text-amber-400 hover:text-amber-300 font-medium px-2 py-1 rounded transition" title="Painel do administrador">⚙ Admin</a>
     <button onclick="logout()"
       class="text-gray-500 hover:text-gray-300 transition px-2 py-1 rounded"
       title="Sair">↩ Sair</button>
@@ -589,6 +590,9 @@ function renderUserBar(user) {
   badge.className = `px-2 py-1 rounded-md font-semibold uppercase tracking-wide ${PLANO_COLORS[plano]||PLANO_COLORS.starter}`;
 
   nome.textContent = user.nome || user.email;
+
+  // Admin link (only for super admins)
+  $('admin-link').classList.toggle('hidden', !user.is_admin);
 
   // Usage count
   const cnpjsUsados = (user.uso_mensal||[]).length;

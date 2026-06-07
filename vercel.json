@@ -16,6 +16,7 @@
     { "src": "/api/admin(.*)",        "dest": "/api/admin.py"         },
     { "src": "/api/(.*)",             "dest": "/api/$1"               },
     { "src": "/app",                  "dest": "/app.html"             },
+    { "src": "/admin/login",          "dest": "/admin-login.html"     },
     { "src": "/admin",                "dest": "/admin.html"           },
     { "src": "/login",                "dest": "/login.html"           },
     { "src": "/register",             "dest": "/register.html"        },

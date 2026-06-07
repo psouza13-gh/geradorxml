@@ -196,7 +196,7 @@
 const TOKEN_KEY = 'gxml_token';
 function getToken()  { return localStorage.getItem(TOKEN_KEY); }
 function authHdrs()  { return { 'Authorization': 'Bearer ' + getToken() }; }
-function logout()    { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem('gxml_user'); window.location.replace('/login'); }
+function logout()    { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem('gxml_user'); window.location.replace('/admin/login'); }
 function $(id) { return document.getElementById(id); }
 
 const PLANO_LABEL = { trial:'Trial', starter:'Starter', pro:'Pro', office:'Office', bpo:'BPO' };
@@ -233,7 +233,7 @@ function fmtDateTime(iso) {
 // ── Access guard ───────────────────────────────────────────────────────────
 (async function guard() {
   const token = getToken();
-  if (!token) { window.location.replace('/login'); return; }
+  if (!token) { window.location.replace('/admin/login'); return; }
 
   $('guard-msg').classList.remove('hidden');
   try {

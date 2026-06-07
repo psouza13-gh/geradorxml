@@ -137,19 +137,15 @@
         </div>
       </div>
 
-      <!-- Auth method selector -->
+      <!-- Auth method: certificado digital A1 (único método disponível por enquanto) -->
       <div>
         <label class="label mb-2 block">Método de Autenticação</label>
-        <div class="flex gap-2">
-          <label class="auth-btn active" id="auth-cert-btn">
-            <input type="radio" name="auth_method" value="cert" checked class="hidden"/>
-            <span>🔐 Certificado Digital A1</span>
-          </label>
-          <label class="auth-btn" id="auth-login-btn">
-            <input type="radio" name="auth_method" value="login" class="hidden"/>
-            <span>🔑 Login e Senha</span>
-          </label>
+        <div class="auth-btn active" style="cursor:default">
+          <span>🔐 Certificado Digital A1</span>
         </div>
+        <p class="text-xs text-gray-500 mt-1.5">
+          Por enquanto o download funciona apenas com certificado digital A1. O acesso por login e senha do portal foi temporariamente desativado.
+        </p>
       </div>
 
       <!-- CERT fields -->
@@ -157,45 +153,13 @@
         <div class="space-y-4">
           <div>
             <label class="label">Certificado Digital A1 (.pfx / .p12) <span class="text-red-400">*</span></label>
-            <input id="cert" name="cert" type="file" accept=".pfx,.p12" class="input"/>
+            <input id="cert" name="cert" type="file" accept=".pfx,.p12" class="input" required/>
             <p class="text-xs text-gray-500 mt-1">Usado apenas durante o download — não é armazenado no servidor.</p>
           </div>
           <div>
             <label class="label">Senha do Certificado <span class="text-red-400">*</span></label>
-            <input id="password" name="password" type="password" placeholder="••••••••" class="input"/>
+            <input id="password" name="password" type="password" placeholder="••••••••" class="input" required/>
           </div>
-        </div>
-      </div>
-
-      <!-- LOGIN fields -->
-      <div id="auth-login-fields" class="hidden">
-        <div class="bg-blue-950/30 border border-blue-800/40 rounded-xl p-4 space-y-3">
-          <div class="flex items-center gap-2 text-xs text-blue-300 mb-1">
-            <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-            </svg>
-            Credenciais de acesso ao portal
-            <a href="https://www.nfse.gov.br/EmissorNacional/Login" target="_blank"
-               class="underline hover:text-blue-200">nfse.gov.br</a>
-          </div>
-          <div>
-            <label class="label">CPF / CNPJ <span class="text-red-400">*</span></label>
-            <input id="portal_login" name="portal_login" type="text"
-              placeholder="000.000.000-00  ou  00.000.000/0001-00"
-              class="input" autocomplete="username"/>
-            <p class="text-xs text-gray-500 mt-1">Mesmo valor usado no campo "CPF/CNPJ" do portal</p>
-          </div>
-          <div>
-            <label class="label">Senha <span class="text-red-400">*</span></label>
-            <input id="portal_senha" name="portal_senha" type="password"
-              placeholder="••••••••" class="input"
-              autocomplete="current-password"/>
-          </div>
-          <p class="text-xs text-gray-400">
-            As mesmas credenciais usadas para entrar em
-            <span class="text-gray-300">nfse.gov.br/EmissorNacional/Login</span>
-          </p>
         </div>
       </div>
 
@@ -428,41 +392,6 @@ function setPeriod(p) {
   else { ini='2023-01-01'; fim=new Date(y,11,31).toISOString().slice(0,10); }
   $('data_inicial').value=ini; $('data_final').value=fim;
 }
-
-// ── Auth method toggle ─────────────────────────────────────────────────────────
-(function setupAuth() {
-  const certBtn  = $('auth-cert-btn');
-  const loginBtn = $('auth-login-btn');
-  const certF    = $('auth-cert-fields');
-  const loginF   = $('auth-login-fields');
-  const certFile = $('cert');
-  const certPwd  = $('password');
-  const plLogin  = $('portal_login');
-  const plSenha  = $('portal_senha');
-
-  function setAuthMode(mode) {
-    const isCert = mode === 'cert';
-    certBtn.classList.toggle('active', isCert);
-    loginBtn.classList.toggle('active', !isCert);
-    certBtn.querySelector('input').checked = isCert;
-    loginBtn.querySelector('input').checked = !isCert;
-
-    certF.classList.toggle('hidden', !isCert);
-    loginF.classList.toggle('hidden', isCert);
-
-    // required attributes — only validate visible fields
-    certFile.required = isCert;
-    certPwd.required  = isCert;
-    plLogin.required  = !isCert;
-    plSenha.required  = !isCert;
-  }
-
-  certBtn.addEventListener('click',  () => setAuthMode('cert'));
-  loginBtn.addEventListener('click', () => setAuthMode('login'));
-
-  // Init
-  setAuthMode('cert');
-})();
 
 // ── Tipo radio buttons ─────────────────────────────────────────────────────────
 (function setupTipo() {

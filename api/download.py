@@ -16,7 +16,6 @@ if ROOT not in sys.path:
 
 from app.services.cert_handler import export_to_pem_files, get_cert_info
 from app.services.nfse_nacional import NfseNacionalClient
-from app.services.nfse_login import autenticar_login
 from app.services import cert_handler as _ch
 from app.services.auth_service import verify_token
 from app.services.subscription_service import verificar_e_registrar_download
@@ -215,7 +214,10 @@ def build_xlsx(rows: list) -> bytes:
 @app.route("/api/download", methods=["POST"])
 def download():
     # ── Common fields ──────────────────────────────────────────────────────────
-    auth_method = request.form.get("auth_method", "cert")   # "cert" | "login"
+    auth_method = request.form.get("auth_method", "cert")   # "cert" | "login" (login temporariamente desativado)
+    if auth_method == "login":
+        return jsonify({"error": "O acesso por login e senha do portal está temporariamente desativado. "
+                                  "Por enquanto, utilize o certificado digital A1 (.pfx/.p12)."}), 400
     cnpj        = "".join(c for c in request.form.get("cnpj", "") if c.isdigit())
     nome        = request.form.get("nome", "Cliente")
     data_ini_s  = request.form.get("data_inicial", "")
@@ -254,55 +256,34 @@ def download():
     messages = []
 
     try:
-        # ── Authentication ─────────────────────────────────────────────────────
-        if auth_method == "login":
-            # Login e senha (Gov.br)
-            portal_login = request.form.get("portal_login", "").strip()
-            portal_senha = request.form.get("portal_senha", "")
-            if not portal_login or not portal_senha:
-                return jsonify({"error": "Informe o CPF/CNPJ e a senha do portal NFS-e."}), 400
+        # ── Authentication (Certificado Digital A1 — único método disponível) ──
+        cert_file = request.files.get("cert")
+        if not cert_file:
+            return jsonify({"error": "Arquivo de certificado (.pfx) não enviado."}), 400
 
-            try:
-                messages.append(f"  Autenticando no portal NFS-e ({portal_login[:4]}***) ...")
-                auth_session = autenticar_login(portal_login, portal_senha, log=messages.append)
-            except RuntimeError as e:
-                return jsonify({"error": str(e), "log": messages}), 401
-            except Exception as e:
-                return jsonify({"error": f"Falha na autenticação: {e}", "log": messages}), 500
+        password = request.form.get("password", "")
 
-            client = NfseNacionalClient(
-                cnpj=cnpj, ambiente=ambiente, session=auth_session,
-            )
+        # ── File size guard ─────────────────────────────────────────────
+        cert_bytes = cert_file.read()
+        if len(cert_bytes) > MAX_CERT_BYTES:
+            return jsonify({"error": "Certificado muito grande (máx. 1 MB)."}), 400
 
-        else:
-            # Certificado Digital A1
-            cert_file = request.files.get("cert")
-            if not cert_file:
-                return jsonify({"error": "Arquivo de certificado (.pfx) não enviado."}), 400
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pfx", prefix="nfse_up_")
+        tmp.write(cert_bytes)
+        tmp.close()
+        tmp_cert_path = tmp.name
 
-            password = request.form.get("password", "")
+        try:
+            info = get_cert_info(tmp_cert_path, password)
+            if info.get("vencido"):
+                return jsonify({"error": f"Certificado vencido em {info['validade']}."}), 400
+        except Exception:
+            return jsonify({"error": "Certificado inválido ou senha incorreta."}), 400
 
-            # ── File size guard ─────────────────────────────────────────────
-            cert_bytes = cert_file.read()
-            if len(cert_bytes) > MAX_CERT_BYTES:
-                return jsonify({"error": "Certificado muito grande (máx. 1 MB)."}), 400
-
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pfx", prefix="nfse_up_")
-            tmp.write(cert_bytes)
-            tmp.close()
-            tmp_cert_path = tmp.name
-
-            try:
-                info = get_cert_info(tmp_cert_path, password)
-                if info.get("vencido"):
-                    return jsonify({"error": f"Certificado vencido em {info['validade']}."}), 400
-            except Exception:
-                return jsonify({"error": "Certificado inválido ou senha incorreta."}), 400
-
-            client = NfseNacionalClient(
-                cnpj=cnpj, cert_path=tmp_cert_path,
-                cert_password=password, ambiente=ambiente,
-            )
+        client = NfseNacionalClient(
+            cnpj=cnpj, cert_path=tmp_cert_path,
+            cert_password=password, ambiente=ambiente,
+        )
 
         # ── Download NFS-e ─────────────────────────────────────────────────────
         try:

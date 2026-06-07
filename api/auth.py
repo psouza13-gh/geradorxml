@@ -20,6 +20,10 @@ from app.services.auth_service import (
 )
 from app.services.validators import validate_cpf, validate_telefone, format_cpf
 from app.services.email_service import send_password_reset_code
+from app.services.meta_capi_service import (
+    track_lead as send_lead,
+    track_trial_start as send_trial_start,
+)
 from app.services.subscription_service import get_uso_mensal
 
 app = Flask(__name__)
@@ -108,6 +112,23 @@ def register():
             return jsonify({"error": "Erro ao criar conta. Tente novamente."}), 500
 
         token = create_token(str(user["id"]), email)
+
+        # Fire-and-forget: notify Meta Ads (Conversions API) of the new lead /
+        # trial start. No-ops silently if the integration isn't configured —
+        # never blocks or fails the registration response.
+        try:
+            user_id = str(user["id"])
+            src_url = request.headers.get("Referer") or f"https://{request.host}/register"
+            ip      = (request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+                       or request.remote_addr)
+            ua      = request.headers.get("User-Agent")
+            send_lead(user_id=user_id, email=email, telefone=telefone,
+                      event_source_url=src_url, client_ip=ip, client_user_agent=ua)
+            send_trial_start(user_id=user_id, email=email, telefone=telefone,
+                             event_source_url=src_url, client_ip=ip, client_user_agent=ua)
+        except Exception:
+            pass
+
         return jsonify({"token": token, "user": _user_json(user)}), 201
 
     except Exception:

@@ -17,6 +17,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from app.services.db import execute
+from app.services.meta_capi_service import track_purchase
 
 app = Flask(__name__)
 
@@ -35,6 +36,15 @@ _LIMITES: dict[str, int] = {
     "pro":     50,
     "office":  150,
     "bpo":     -1,
+}
+
+# Monthly subscription value per plan (BRL) — used as the "Purchase" value
+# reported to Meta Ads Conversions API (keep in sync with api/subscribe.py).
+_VALORES: dict[str, float] = {
+    "starter": 97.0,
+    "pro":     297.0,
+    "office":  597.0,
+    "bpo":     997.0,
 }
 
 
@@ -62,7 +72,7 @@ def webhook():
         return jsonify({"ok": True, "msg": "no customer id"}), 200
 
     user = execute(
-        "SELECT id, plano FROM users WHERE asaas_customer_id = %s",
+        "SELECT id, email, plano FROM users WHERE asaas_customer_id = %s",
         (customer_id,),
         fetch="one",
     )
@@ -89,6 +99,7 @@ def webhook():
                 break
 
         limite = _LIMITES.get(plano, 10)
+        plano_anterior = (user.get("plano") or "trial").lower()
 
         execute(
             """
@@ -104,6 +115,19 @@ def webhook():
             """,
             (plano, limite, user_id),
         )
+
+        # Notify Meta Ads (Conversions API) of the conversion — only on the
+        # FIRST paid activation (trial → paid), not on monthly renewals, to
+        # avoid duplicating "Purchase" signals for the same customer.
+        if plano_anterior == "trial":
+            try:
+                track_purchase(
+                    user_id=user_id, email=user.get("email"),
+                    plano=plano, value=_VALORES.get(plano, 0.0),
+                    event_id_suffix=str(payment.get("id") or subscription.get("id") or now.timestamp()),
+                )
+            except Exception:
+                pass
 
     # ── Payment overdue → suspend ──────────────────────────────────────────
     elif event == "PAYMENT_OVERDUE":

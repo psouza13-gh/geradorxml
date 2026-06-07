@@ -101,6 +101,80 @@
     <div id="u-pager" class="flex items-center justify-between mt-3 text-xs text-gray-500"></div>
   </section>
 
+  <!-- ── INTEGRAÇÃO: META CONVERSIONS API ──────────────── -->
+  <section class="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+    <div class="flex items-center justify-between gap-3 flex-wrap mb-1">
+      <h2 class="text-sm font-semibold text-white flex items-center gap-2">
+        Integração — Meta Conversions API
+        <span id="meta-status-badge" class="badge bg-gray-700/40 text-gray-400 border border-gray-600/40">verificando…</span>
+      </h2>
+    </div>
+    <p class="text-xs text-gray-500 mb-4">
+      Envia eventos de conversão (cadastro, início de trial, assinatura paga) diretamente do servidor para o
+      Meta/Facebook Ads — melhora a otimização de campanhas mesmo quando o pixel do navegador é bloqueado.
+    </p>
+
+    <div id="meta-token-warning" class="hidden text-xs text-amber-300 bg-amber-900/20 border border-amber-800/40 rounded-lg px-3 py-2 mb-4">
+      ⚠ A variável de ambiente <code class="text-amber-200">META_CAPI_ACCESS_TOKEN</code> não está configurada no servidor.
+      Adicione-a em Vercel → Project Settings → Environment Variables e implante novamente para ativar o envio de eventos.
+      <span class="block text-[11px] text-amber-400/80 mt-1">Por segurança, o token de acesso nunca é armazenado no banco de dados nem exibido aqui — apenas em variável de ambiente do servidor.</span>
+    </div>
+
+    <div id="meta-err" class="hidden text-xs text-red-300 bg-red-900/30 border border-red-800 rounded-lg px-3 py-2 mb-3"></div>
+    <div id="meta-ok"  class="hidden text-xs text-green-300 bg-green-900/30 border border-green-800 rounded-lg px-3 py-2 mb-3"></div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <div class="space-y-4">
+        <label class="flex items-center gap-2.5 cursor-pointer select-none">
+          <input id="meta-enabled" type="checkbox" class="w-4 h-4 accent-amber-500"/>
+          <span class="text-sm text-gray-200">Ativar envio de eventos para o Meta</span>
+        </label>
+
+        <div>
+          <label class="block text-[11px] font-medium text-gray-400 mb-1.5">Pixel ID / Dataset ID</label>
+          <input id="meta-pixel-id" type="text" inputmode="numeric" placeholder="Ex.: 1234567890123456"
+            class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500"/>
+          <p class="text-[11px] text-gray-500 mt-1">Encontrado no Gerenciador de Eventos do Meta → Origens de dados.</p>
+        </div>
+
+        <div>
+          <label class="block text-[11px] font-medium text-gray-400 mb-1.5">Código de evento de teste <span class="text-gray-600">(opcional)</span></label>
+          <input id="meta-test-code" type="text" placeholder="Ex.: TEST12345"
+            class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500"/>
+          <p class="text-[11px] text-gray-500 mt-1">Gerado em Gerenciador de Eventos → Testar eventos. Usado apenas pelo botão "Enviar evento de teste".</p>
+        </div>
+      </div>
+
+      <div class="space-y-3">
+        <span class="block text-[11px] font-medium text-gray-400">Eventos enviados automaticamente</span>
+        <label class="flex items-center justify-between gap-3 bg-gray-800/60 border border-gray-700 rounded-lg px-3 py-2.5 cursor-pointer">
+          <span class="text-sm text-gray-200">Lead — novo cadastro</span>
+          <input id="meta-ev-lead" type="checkbox" class="w-4 h-4 accent-amber-500"/>
+        </label>
+        <label class="flex items-center justify-between gap-3 bg-gray-800/60 border border-gray-700 rounded-lg px-3 py-2.5 cursor-pointer">
+          <span class="text-sm text-gray-200">StartTrial — início do trial gratuito</span>
+          <input id="meta-ev-trial" type="checkbox" class="w-4 h-4 accent-amber-500"/>
+        </label>
+        <label class="flex items-center justify-between gap-3 bg-gray-800/60 border border-gray-700 rounded-lg px-3 py-2.5 cursor-pointer">
+          <span class="text-sm text-gray-200">Purchase — assinatura paga confirmada</span>
+          <input id="meta-ev-purchase" type="checkbox" class="w-4 h-4 accent-amber-500"/>
+        </label>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-3 mt-5">
+      <button id="meta-save-btn" onclick="metaSaveSettings()"
+        class="bg-amber-500 hover:bg-amber-400 text-gray-950 font-semibold text-sm px-4 py-2 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+        Salvar configurações
+      </button>
+      <button id="meta-test-btn" onclick="metaSendTestEvent()"
+        class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 font-medium text-sm px-4 py-2 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+        Enviar evento de teste
+      </button>
+      <span id="meta-saving-msg" class="hidden text-xs text-gray-500">Salvando…</span>
+    </div>
+  </section>
+
 </main>
 
 <!-- ══════════════════════════════════════════════════════
@@ -254,7 +328,116 @@ function fmtDateTime(iso) {
 })();
 
 async function _loadAll() {
-  await Promise.all([_loadStats(), _loadUsers()]);
+  await Promise.all([_loadStats(), _loadUsers(), _loadMetaIntegration()]);
+}
+
+// ── Integration: Meta Conversions API ──────────────────────────────────────
+function _metaShowMsg(kind, msg) {
+  const errEl = $('meta-err'), okEl = $('meta-ok');
+  errEl.classList.add('hidden'); okEl.classList.add('hidden');
+  if (!msg) return;
+  const el = kind === 'error' ? errEl : okEl;
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+function _metaApplySettings(payload) {
+  const s = payload.settings || {};
+  $('meta-enabled').checked     = !!s.enabled;
+  $('meta-pixel-id').value      = s.pixel_id || '';
+  $('meta-test-code').value     = s.test_event_code || '';
+  const ev = s.events || {};
+  $('meta-ev-lead').checked     = ev.lead     !== false;
+  $('meta-ev-trial').checked    = ev.trial    !== false;
+  $('meta-ev-purchase').checked = ev.purchase !== false;
+
+  $('meta-token-warning').classList.toggle('hidden', !!payload.token_configured);
+
+  const badge = $('meta-status-badge');
+  if (payload.active) {
+    badge.textContent = 'Ativo';
+    badge.className = 'badge bg-green-500/15 text-green-300 border border-green-500/30';
+  } else if (payload.token_configured && s.pixel_id) {
+    badge.textContent = 'Configurado — desativado';
+    badge.className = 'badge bg-gray-700/40 text-gray-300 border border-gray-600/40';
+  } else {
+    badge.textContent = 'Não configurado';
+    badge.className = 'badge bg-orange-500/15 text-orange-300 border border-orange-500/30';
+  }
+}
+
+async function _loadMetaIntegration() {
+  try {
+    const resp = await fetch('/api/admin/integrations/meta', { headers: authHdrs() });
+    if (!resp.ok) return;
+    _metaApplySettings(await resp.json());
+  } catch (e) {}
+}
+
+async function metaSaveSettings() {
+  _metaShowMsg(null);
+  const pixelId = $('meta-pixel-id').value.trim();
+  if (pixelId && !/^\d+$/.test(pixelId)) {
+    _metaShowMsg('error', 'Pixel ID deve conter apenas números.');
+    return;
+  }
+
+  const btn = $('meta-save-btn');
+  btn.disabled = true;
+  $('meta-saving-msg').classList.remove('hidden');
+
+  try {
+    const resp = await fetch('/api/admin/integrations/meta', {
+      method: 'POST',
+      headers: { ...authHdrs(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        enabled:         $('meta-enabled').checked,
+        pixel_id:        pixelId,
+        test_event_code: $('meta-test-code').value.trim(),
+        events: {
+          lead:     $('meta-ev-lead').checked,
+          trial:    $('meta-ev-trial').checked,
+          purchase: $('meta-ev-purchase').checked,
+        },
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { _metaShowMsg('error', data.error || 'Erro ao salvar.'); return; }
+    _metaApplySettings(data);
+    _metaShowMsg('ok', 'Configurações salvas com sucesso.');
+  } catch (e) {
+    _metaShowMsg('error', 'Erro de conexão. Tente novamente.');
+  } finally {
+    btn.disabled = false;
+    $('meta-saving-msg').classList.add('hidden');
+  }
+}
+
+async function metaSendTestEvent() {
+  _metaShowMsg(null);
+  const btn = $('meta-test-btn');
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Enviando…';
+
+  try {
+    const resp = await fetch('/api/admin/integrations/meta/test', {
+      method: 'POST',
+      headers: authHdrs(),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      _metaShowMsg('error', (data.error || 'Erro ao enviar evento de teste.') +
+        (data.details ? ` — ${typeof data.details === 'string' ? data.details : JSON.stringify(data.details)}` : ''));
+      return;
+    }
+    _metaShowMsg('ok', data.msg || 'Evento de teste enviado com sucesso.');
+  } catch (e) {
+    _metaShowMsg('error', 'Erro de conexão. Tente novamente.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
 }
 
 // ── Stats ──────────────────────────────────────────────────────────────────

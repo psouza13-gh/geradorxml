@@ -9,6 +9,10 @@
   POST   /api/admin/users/<id>/unfreeze   — restore a frozen account
   DELETE /api/admin/users/<id>/subscription — cancel/remove the user's subscription
 
+  GET    /api/admin/integrations/meta       — Meta Conversions API config + status
+  POST   /api/admin/integrations/meta       — update pixel id / event toggles / test code
+  POST   /api/admin/integrations/meta/test  — send a test event to Meta
+
 All routes require a JWT for a user with is_admin = TRUE.
 """
 import sys, os, re
@@ -21,6 +25,7 @@ if ROOT not in sys.path:
 
 from app.services.auth_service import verify_token
 from app.services.db import execute
+from app.services import meta_capi_service as meta_capi
 
 app = Flask(__name__)
 
@@ -423,3 +428,79 @@ def delete_subscription(user_id):
         return jsonify({"ok": True, "msg": "Assinatura removida. Conta voltou ao estado padrão (cancelada/sem plano ativo)."})
     except Exception as exc:
         return jsonify({"error": f"Erro ao excluir assinatura: {exc}"}), 500
+
+
+# ── Integrations: Meta Conversions API ────────────────────────────────────────
+# GET   /api/admin/integrations/meta       — current config + token status
+# POST  /api/admin/integrations/meta       — update pixel id / toggles / test code
+# POST  /api/admin/integrations/meta/test  — send a test "Lead" event to Meta
+#
+# IMPORTANT: the access token is a server-side secret (META_CAPI_ACCESS_TOKEN
+# env var) — it is NEVER read from or written to the request/response here.
+
+@app.route("/api/admin/integrations/meta", methods=["GET"])
+def meta_capi_get():
+    if not _require_admin():
+        return jsonify({"error": "Acesso restrito ao administrador."}), 403
+    try:
+        settings = meta_capi.get_settings()
+        return jsonify({
+            "settings":         settings,
+            "token_configured": meta_capi.token_configured(),
+            "active":           meta_capi.is_active(),
+        })
+    except Exception as exc:
+        return jsonify({"error": f"Erro ao carregar integração: {exc}"}), 500
+
+
+@app.route("/api/admin/integrations/meta", methods=["POST"])
+def meta_capi_update():
+    if not _require_admin():
+        return jsonify({"error": "Acesso restrito ao administrador."}), 403
+
+    data = request.get_json(silent=True) or {}
+    pixel_id = data.get("pixel_id")
+    if pixel_id is not None:
+        pixel_id = str(pixel_id).strip()
+        if pixel_id and not pixel_id.isdigit():
+            return jsonify({"error": "Pixel ID deve conter apenas números."}), 400
+
+    try:
+        settings = meta_capi.save_settings(
+            enabled=data.get("enabled"),
+            pixel_id=pixel_id,
+            test_event_code=data.get("test_event_code"),
+            events=data.get("events") if isinstance(data.get("events"), dict) else None,
+        )
+        return jsonify({
+            "ok":               True,
+            "settings":         settings,
+            "token_configured": meta_capi.token_configured(),
+            "active":           meta_capi.is_active(),
+        })
+    except Exception as exc:
+        return jsonify({"error": f"Erro ao salvar integração: {exc}"}), 500
+
+
+@app.route("/api/admin/integrations/meta/test", methods=["POST"])
+def meta_capi_send_test():
+    if not _require_admin():
+        return jsonify({"error": "Acesso restrito ao administrador."}), 403
+
+    if not meta_capi.token_configured():
+        return jsonify({"error": "META_CAPI_ACCESS_TOKEN não configurado no servidor. "
+                                  "Adicione a variável de ambiente e implante novamente."}), 400
+    settings = meta_capi.get_settings()
+    if not settings.get("pixel_id"):
+        return jsonify({"error": "Informe e salve o Pixel ID antes de enviar um evento de teste."}), 400
+
+    try:
+        result = meta_capi.send_test_event()
+        if result.get("ok"):
+            return jsonify({"ok": True, "msg": "Evento de teste enviado ao Meta com sucesso. "
+                                                 "Verifique em Eventos de Teste no Gerenciador de Eventos.",
+                            "response": result.get("body")})
+        return jsonify({"error": "Meta recusou o evento de teste.",
+                        "details": result.get("body") or result.get("skipped")}), 502
+    except Exception as exc:
+        return jsonify({"error": f"Erro ao enviar evento de teste: {exc}"}), 500

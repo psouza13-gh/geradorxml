@@ -81,3 +81,22 @@ CREATE TABLE IF NOT EXISTS monthly_usage (
 );
 
 CREATE INDEX IF NOT EXISTS idx_usage_user_mes ON monthly_usage (user_id, mes);
+
+-- Generic key/value app settings (admin-editable via /admin panel).
+-- Used by the Meta Conversions API integration (pixel id, enabled events,
+-- test event code). The access token is NEVER stored here — it lives only
+-- in the META_CAPI_ACCESS_TOKEN environment variable (server-side secret).
+CREATE TABLE IF NOT EXISTS app_settings (
+    key         TEXT PRIMARY KEY,
+    value       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO app_settings (key, value)
+VALUES ('meta_capi', '{
+    "enabled": false,
+    "pixel_id": "",
+    "test_event_code": "",
+    "events": { "lead": true, "trial": true, "purchase": true }
+}'::jsonb)
+ON CONFLICT (key) DO NOTHING;

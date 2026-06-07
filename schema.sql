@@ -29,11 +29,31 @@ CREATE TABLE IF NOT EXISTS users (
     plano_origem        TEXT NOT NULL DEFAULT 'trial',   -- trial | asaas | admin_temporario | admin_vitalicio
     status_anterior     TEXT,                            -- status saved before freezing (to restore on unfreeze)
 
+    -- Personal data (LGPD-sensitive) — encrypted at rest, see app/services/crypto_service.py
+    -- cpf_hash: one-way salted hash, unique-indexed → blocks duplicate trial signups per CPF
+    cpf_hash            TEXT,
+    cpf_encrypted       TEXT,
+    telefone_encrypted  TEXT,
+
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
 CREATE INDEX IF NOT EXISTS idx_users_asaas ON users (asaas_customer_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_cpf_hash ON users (cpf_hash) WHERE cpf_hash IS NOT NULL;
+
+-- Password reset codes (short-lived, single-use, emailed to the account owner)
+CREATE TABLE IF NOT EXISTS password_resets (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash   TEXT NOT NULL,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    used_at     TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets (user_id);
+CREATE INDEX IF NOT EXISTS idx_password_resets_code ON password_resets (code_hash);
 
 -- Saved clients (per user)
 CREATE TABLE IF NOT EXISTS clients (

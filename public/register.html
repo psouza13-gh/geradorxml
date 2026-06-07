@@ -67,6 +67,18 @@
 
     .footer-txt{text-align:center;font-size:.8rem;color:#475569;margin-top:1.5rem}
     .hint{font-size:.7rem;color:#475569;margin-top:.3rem}
+
+    .session-banner{
+      background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.2);
+      border-radius:.75rem;padding:1.25rem;
+    }
+    .sb-text{font-size:.85rem;color:#cbd5e1;margin-bottom:1rem;line-height:1.5}
+    .sb-text strong{color:#fff}
+    .btn-ghost{
+      background:transparent;border:1px solid #1e3a5f;color:#94a3b8;
+      margin-top:.6rem;
+    }
+    .btn-ghost:hover{background:#0a1628;color:#e2e8f0}
     .spin{animation:spin .8s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
   </style>
@@ -90,6 +102,15 @@
 
   <div id="err" class="err"></div>
 
+  <div id="session-banner" class="session-banner" style="display:none">
+    <p class="sb-text">
+      Você já está conectado como <strong id="sb-name"></strong> <span id="sb-email"></span>.
+      Para criar uma conta nova, primeiro saia da conta atual.
+    </p>
+    <button id="sb-continue" class="btn" type="button">Ir para o painel →</button>
+    <button id="sb-logout" class="btn btn-ghost" type="button">Sair e criar nova conta</button>
+  </div>
+
   <form id="form">
     <div class="field">
       <label for="nome">Nome completo</label>
@@ -100,6 +121,17 @@
       <label for="email">E-mail profissional</label>
       <input id="email" type="email" placeholder="contador@escritorio.com.br"
              autocomplete="email" required/>
+    </div>
+    <div class="field">
+      <label for="cpf">CPF</label>
+      <input id="cpf" type="text" inputmode="numeric" placeholder="000.000.000-00"
+             autocomplete="off" maxlength="14" required/>
+      <p class="hint">Usado apenas para validar sua identidade e evitar contas duplicadas — seus dados ficam criptografados.</p>
+    </div>
+    <div class="field">
+      <label for="telefone">Telefone / WhatsApp</label>
+      <input id="telefone" type="text" inputmode="numeric" placeholder="(11) 91234-5678"
+             autocomplete="tel" maxlength="15" required/>
     </div>
     <div class="field">
       <label for="senha">Senha</label>
@@ -129,17 +161,57 @@
 
 <script>
 const TOKEN_KEY = 'gxml_token';
+const USER_KEY  = 'gxml_user';
 
-// Already logged in?
-if (localStorage.getItem(TOKEN_KEY)) {
-  window.location.replace('/app');
+// Already logged in? Don't silently bounce — show a clear choice instead,
+// so testers/returning visitors understand what's happening (no "invisible redirect").
+(function checkExisting() {
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (!token) return;
+
+  let user = {};
+  try { user = JSON.parse(localStorage.getItem(USER_KEY) || '{}'); } catch (e) {}
+
+  document.getElementById('sb-name').textContent  = user.nome  || 'sua conta';
+  document.getElementById('sb-email').textContent = user.email ? `(${user.email})` : '';
+  document.getElementById('session-banner').style.display = 'block';
+  document.getElementById('form').style.display = 'none';
+
+  document.getElementById('sb-continue').addEventListener('click', () => {
+    window.location.replace('/app');
+  });
+  document.getElementById('sb-logout').addEventListener('click', () => {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+    document.getElementById('session-banner').style.display = 'none';
+    document.getElementById('form').style.display = '';
+  });
+})();
+
+const form     = document.getElementById('form');
+const btn      = document.getElementById('btn');
+const btnTxt   = document.getElementById('btn-txt');
+const ico      = document.getElementById('ico');
+const errEl    = document.getElementById('err');
+const cpfEl    = document.getElementById('cpf');
+const telEl    = document.getElementById('telefone');
+
+// Lightweight input masks (visual only — server re-validates everything).
+function maskCpf(v) {
+  return v.replace(/\D/g, '').slice(0, 11)
+          .replace(/(\d{3})(\d)/, '$1.$2')
+          .replace(/(\d{3})(\d)/, '$1.$2')
+          .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
 }
-
-const form   = document.getElementById('form');
-const btn    = document.getElementById('btn');
-const btnTxt = document.getElementById('btn-txt');
-const ico    = document.getElementById('ico');
-const errEl  = document.getElementById('err');
+function maskTelefone(v) {
+  const d = v.replace(/\D/g, '').slice(0, 11);
+  if (d.length <= 10) {
+    return d.replace(/(\d{2})(\d{4})(\d{0,4})/, (m, a, b, c) => c ? `(${a}) ${b}-${c}` : (b ? `(${a}) ${b}` : `(${a}`));
+  }
+  return d.replace(/(\d{2})(\d{5})(\d{0,4})/, (m, a, b, c) => c ? `(${a}) ${b}-${c}` : (b ? `(${a}) ${b}` : `(${a}`));
+}
+cpfEl.addEventListener('input', () => { cpfEl.value = maskCpf(cpfEl.value); });
+telEl.addEventListener('input', () => { telEl.value = maskTelefone(telEl.value); });
 
 function showErr(msg) {
   errEl.textContent = msg;
@@ -161,11 +233,21 @@ form.addEventListener('submit', async e => {
   e.preventDefault();
   hideErr();
 
-  const nome  = document.getElementById('nome').value.trim();
-  const email = document.getElementById('email').value.trim();
-  const senha = document.getElementById('senha').value;
-  const senha2 = document.getElementById('senha2').value;
+  const nome     = document.getElementById('nome').value.trim();
+  const email    = document.getElementById('email').value.trim();
+  const cpf      = cpfEl.value.replace(/\D/g, '');
+  const telefone = telEl.value.replace(/\D/g, '');
+  const senha    = document.getElementById('senha').value;
+  const senha2   = document.getElementById('senha2').value;
 
+  if (cpf.length !== 11) {
+    showErr('Informe um CPF válido (11 dígitos).');
+    return;
+  }
+  if (telefone.length < 10 || telefone.length > 11) {
+    showErr('Informe um telefone válido com DDD.');
+    return;
+  }
   if (senha !== senha2) {
     showErr('As senhas não conferem.');
     return;
@@ -181,7 +263,7 @@ form.addEventListener('submit', async e => {
     const resp = await fetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nome, email, senha })
+      body: JSON.stringify({ nome, email, cpf, telefone, senha })
     });
 
     const data = await resp.json();

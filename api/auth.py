@@ -15,7 +15,11 @@ if ROOT not in sys.path:
 from app.services.auth_service import (
     create_user, get_user_by_email, check_password,
     create_token, verify_token, get_user_by_id,
+    cpf_already_registered, update_password,
+    create_password_reset_code, verify_and_consume_reset_code,
 )
+from app.services.validators import validate_cpf, validate_telefone, format_cpf
+from app.services.email_service import send_password_reset_code
 from app.services.subscription_service import get_uso_mensal
 
 app = Flask(__name__)
@@ -72,10 +76,12 @@ def preflight(_=None):
 
 @app.route("/api/auth/register", methods=["POST"])
 def register():
-    data  = request.get_json(silent=True) or {}
-    nome  = (data.get("nome")  or "").strip()
-    email = (data.get("email") or "").strip().lower()
-    senha = data.get("senha")  or ""
+    data     = request.get_json(silent=True) or {}
+    nome     = (data.get("nome")     or "").strip()
+    email    = (data.get("email")    or "").strip().lower()
+    senha    = data.get("senha")     or ""
+    cpf      = (data.get("cpf")      or "").strip()
+    telefone = (data.get("telefone") or "").strip()
 
     if not nome:
         return jsonify({"error": "Nome é obrigatório."}), 400
@@ -83,12 +89,21 @@ def register():
         return jsonify({"error": "E-mail inválido."}), 400
     if len(senha) < 6:
         return jsonify({"error": "Senha deve ter ao menos 6 caracteres."}), 400
+    # CPF and telefone are required at signup specifically to deter mass /
+    # throwaway trial-account creation (one trial per real person).
+    if not validate_cpf(cpf):
+        return jsonify({"error": "CPF inválido. Verifique os números digitados."}), 400
+    if not validate_telefone(telefone):
+        return jsonify({"error": "Telefone inválido. Use o formato (DDD) 9XXXX-XXXX."}), 400
 
     try:
         if get_user_by_email(email):
             return jsonify({"error": "E-mail já cadastrado."}), 409
+        if cpf_already_registered(cpf):
+            return jsonify({"error": f"Este CPF ({format_cpf(cpf)}) já possui uma conta cadastrada. "
+                                     f"Faça login ou recupere sua senha."}), 409
 
-        user = create_user(nome, email, senha)
+        user = create_user(nome, email, senha, cpf=cpf, telefone=telefone)
         if not user:
             return jsonify({"error": "Erro ao criar conta. Tente novamente."}), 500
 
@@ -117,6 +132,59 @@ def login():
 
         token = create_token(str(user["id"]), email)
         return jsonify({"token": token, "user": _user_json(user, with_uso=True)})
+
+    except Exception:
+        return jsonify({"error": "Erro interno. Tente novamente."}), 500
+
+
+# ── POST /api/auth/forgot-password ────────────────────────────────────────────
+# Request a 6-digit reset code by email. Always returns a generic
+# "se o e-mail existir, enviamos um código" response — never reveals
+# whether the address has an account (prevents account enumeration).
+
+@app.route("/api/auth/forgot-password", methods=["POST"])
+def forgot_password():
+    data  = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+
+    generic = jsonify({"message": "Se este e-mail estiver cadastrado, enviaremos um código de redefinição em instantes."})
+
+    if not email or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        return generic
+
+    try:
+        user = get_user_by_email(email)
+        if user:
+            code = create_password_reset_code(str(user["id"]))
+            if code:  # None means "cooldown" — silently skip re-send
+                send_password_reset_code(user["email"], user["nome"], code)
+        return generic
+    except Exception:
+        return generic
+
+
+# ── POST /api/auth/reset-password ─────────────────────────────────────────────
+# Confirm the emailed code + set a new password.
+
+@app.route("/api/auth/reset-password", methods=["POST"])
+def reset_password():
+    data  = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    code  = (data.get("code")  or "").strip()
+    senha = data.get("senha")  or ""
+
+    if not email or not code:
+        return jsonify({"error": "Informe o e-mail e o código recebido."}), 400
+    if len(senha) < 6:
+        return jsonify({"error": "A nova senha deve ter ao menos 6 caracteres."}), 400
+
+    try:
+        user = get_user_by_email(email)
+        if not user or not verify_and_consume_reset_code(str(user["id"]), code):
+            return jsonify({"error": "Código inválido ou expirado. Solicite um novo."}), 400
+
+        update_password(str(user["id"]), senha)
+        return jsonify({"message": "Senha redefinida com sucesso. Você já pode entrar com a nova senha."})
 
     except Exception:
         return jsonify({"error": "Erro interno. Tente novamente."}), 500

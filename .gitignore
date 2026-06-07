@@ -37,3 +37,6 @@ nfse_*.key.pem
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Vercel CLI local config
+.vercel/

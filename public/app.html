@@ -56,7 +56,50 @@
 <!-- Trial warning banner -->
 <div id="trial-banner" class="hidden border-b border-yellow-700/50 bg-yellow-900/20 px-6 py-2 text-xs text-yellow-300 flex items-center justify-between gap-4">
   <span id="trial-msg"></span>
-  <a href="/" class="font-semibold text-yellow-200 hover:text-white underline whitespace-nowrap">Ver planos →</a>
+  <button onclick="openSubscribeModal()"
+    class="font-semibold text-yellow-200 hover:text-white underline whitespace-nowrap">Assinar agora →</button>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     MODAL: ASSINAR PLANO (ASAAS checkout)
+══════════════════════════════════════════════════════ -->
+<div id="sub-modal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/70 px-4"
+  onclick="if(event.target===this) closeSubscribeModal()">
+  <div class="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md p-6 space-y-4">
+    <div class="flex items-center justify-between">
+      <h2 class="text-lg font-semibold text-white">Assinar um plano</h2>
+      <button onclick="closeSubscribeModal()" class="text-gray-500 hover:text-gray-300 text-xl leading-none">×</button>
+    </div>
+
+    <div id="sub-err" class="hidden text-xs text-red-300 bg-red-900/30 border border-red-800 rounded-lg px-3 py-2"></div>
+
+    <div>
+      <label class="block text-xs font-medium text-gray-400 mb-1.5">Escolha o plano</label>
+      <div id="sub-planos" class="grid grid-cols-2 gap-2"></div>
+    </div>
+
+    <div>
+      <label for="sub-cpfcnpj" class="block text-xs font-medium text-gray-400 mb-1.5">CPF ou CNPJ (cobrança)</label>
+      <input id="sub-cpfcnpj" type="text" inputmode="numeric" placeholder="Somente números"
+        class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"/>
+    </div>
+
+    <div>
+      <label class="block text-xs font-medium text-gray-400 mb-1.5">Forma de pagamento</label>
+      <select id="sub-billing" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+        <option value="UNDEFINED">Escolher na próxima tela (cartão, boleto ou PIX)</option>
+        <option value="CREDIT_CARD">Cartão de crédito</option>
+        <option value="PIX">PIX</option>
+        <option value="BOLETO">Boleto</option>
+      </select>
+    </div>
+
+    <button id="sub-submit" onclick="submitSubscription()"
+      class="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:text-gray-400 text-white font-semibold text-sm py-2.5 rounded-lg transition flex items-center justify-center gap-2">
+      <span id="sub-submit-txt">Continuar para pagamento</span>
+    </button>
+    <p class="text-[11px] text-gray-500 text-center">Você será redirecionado ao ambiente seguro do ASAAS para concluir o pagamento.</p>
+  </div>
 </div>
 
 <!-- ══════════════════════════════════════════════════════
@@ -743,6 +786,114 @@ async function refreshClientSelect() {
     sel.appendChild(opt);
   });
   if(prev) sel.value = prev;
+}
+
+// ════════════════════════════════════════════════════════
+//  SUBSCRIBE (ASAAS checkout)
+// ════════════════════════════════════════════════════════
+const SUB_PLANOS = [
+  { id: 'starter', nome: 'Starter', preco: 'R$ 97/mês',  desc: 'Até 10 CNPJs/mês'      },
+  { id: 'pro',     nome: 'Pro',     preco: 'R$ 297/mês', desc: 'Até 50 CNPJs/mês'      },
+  { id: 'office',  nome: 'Office',  preco: 'R$ 597/mês', desc: 'Até 150 CNPJs/mês'     },
+  { id: 'bpo',     nome: 'BPO',     preco: 'R$ 997/mês', desc: 'Ilimitado + API'       },
+];
+
+let _subPlanoSelecionado = null;
+
+function _renderSubPlanos() {
+  const el = $('sub-planos');
+  el.innerHTML = SUB_PLANOS.map(p => `
+    <button type="button" data-plano="${p.id}" onclick="_selectSubPlano('${p.id}')"
+      class="sub-plano-card text-left border border-gray-700 bg-gray-800/60 rounded-xl px-3 py-2.5 transition hover:border-blue-500/60">
+      <div class="text-sm font-semibold text-white">${p.nome}</div>
+      <div class="text-sm font-bold text-green-400">${p.preco}</div>
+      <div class="text-[11px] text-gray-400 mt-0.5">${p.desc}</div>
+    </button>
+  `).join('');
+}
+
+function _selectSubPlano(id) {
+  _subPlanoSelecionado = id;
+  document.querySelectorAll('#sub-planos .sub-plano-card').forEach(card => {
+    const active = card.getAttribute('data-plano') === id;
+    card.classList.toggle('border-blue-500', active);
+    card.classList.toggle('ring-1', active);
+    card.classList.toggle('ring-blue-500', active);
+    card.classList.toggle('border-gray-700', !active);
+  });
+}
+
+function _subShowError(msg) {
+  const box = $('sub-err');
+  if(!msg) { box.classList.add('hidden'); box.textContent=''; return; }
+  box.textContent = msg;
+  box.classList.remove('hidden');
+}
+
+function openSubscribeModal() {
+  _renderSubPlanos();
+  _subPlanoSelecionado = null;
+  $('sub-cpfcnpj').value = '';
+  $('sub-billing').value = 'UNDEFINED';
+  _subShowError(null);
+  // Pre-select plan based on user's current plan, defaulting to "pro"
+  const cached = localStorage.getItem(USER_KEY);
+  let atual = 'pro';
+  if(cached) { try { atual = (JSON.parse(cached).plano||'pro').toLowerCase(); } catch(e){} }
+  _selectSubPlano(SUB_PLANOS.some(p=>p.id===atual) ? atual : 'pro');
+  const modal = $('sub-modal');
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+}
+
+function closeSubscribeModal() {
+  const modal = $('sub-modal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+async function submitSubscription() {
+  _subShowError(null);
+
+  if(!_subPlanoSelecionado) { _subShowError('Selecione um plano.'); return; }
+  const cpfCnpj = stripCNPJ($('sub-cpfcnpj').value);
+  if(cpfCnpj.length !== 11 && cpfCnpj.length !== 14) {
+    _subShowError('Informe um CPF (11 dígitos) ou CNPJ (14 dígitos) válido.');
+    return;
+  }
+  const billingType = $('sub-billing').value;
+
+  const btn = $('sub-submit');
+  const txt = $('sub-submit-txt');
+  btn.disabled = true;
+  txt.textContent = 'Processando…';
+
+  try {
+    const resp = await fetch('/api/subscribe', {
+      method: 'POST',
+      headers: { ...authHdrs(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plano: _subPlanoSelecionado, cpfCnpj, billingType }),
+    });
+    const data = await resp.json().catch(()=>({}));
+
+    if(resp.status === 401) { logout(); return; }
+
+    if(!resp.ok) {
+      _subShowError(data.error || 'Não foi possível iniciar a assinatura. Tente novamente.');
+      return;
+    }
+    if(data.checkout_url) {
+      txt.textContent = 'Redirecionando…';
+      window.location.href = data.checkout_url;
+      return;
+    }
+    _subShowError(data.error || 'Assinatura criada! Atualize a página em alguns instantes para continuar.');
+  } catch(e) {
+    _subShowError('Erro de conexão. Tente novamente.');
+  } finally {
+    btn.disabled = false;
+    txt.textContent = 'Continuar para pagamento';
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

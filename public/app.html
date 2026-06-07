@@ -4,6 +4,7 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>NFS-e Downloader</title>
+  <script src="/js/meta-pixel.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -774,6 +775,15 @@ function openSubscribeModal() {
   let atual = 'pro';
   if(cached) { try { atual = (JSON.parse(cached).plano||'pro').toLowerCase(); } catch(e){} }
   _selectSubPlano(SUB_PLANOS.some(p=>p.id===atual) ? atual : 'pro');
+
+  // Meta Ads: usuário está vendo as opções de assinatura (ViewContent)
+  if(window.metaTrack) {
+    const planoInfo = SUB_PLANOS.find(p => p.id === atual) || SUB_PLANOS[1];
+    window.metaTrack('ViewContent',
+      { content_name: planoInfo.nome, content_category: 'subscription_modal' },
+      window.metaEventId ? window.metaEventId('viewcontent') : undefined);
+  }
+
   const modal = $('sub-modal');
   modal.classList.remove('hidden');
   modal.classList.add('flex');
@@ -817,6 +827,20 @@ async function submitSubscription() {
     }
     if(data.checkout_url) {
       txt.textContent = 'Redirecionando…';
+
+      // Meta Ads: usuário iniciou o checkout (InitiateCheckout) — dispara
+      // antes do redirect para o ASAAS, com o mesmo event_id padrão usado
+      // pelo CAPI (caso o backend venha a reutilizá-lo no futuro p/ dedup).
+      if(window.metaTrack) {
+        const _VALORES_PLANO = { starter: 97, pro: 297, office: 597, bpo: 997 };
+        window.metaTrack('InitiateCheckout', {
+          content_name: _subPlanoSelecionado,
+          content_category: 'subscription_checkout',
+          value: _VALORES_PLANO[_subPlanoSelecionado] || 0,
+          currency: 'BRL',
+        }, window.metaEventId ? window.metaEventId('checkout-' + _subPlanoSelecionado) : undefined);
+      }
+
       window.location.href = data.checkout_url;
       return;
     }

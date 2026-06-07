@@ -6,7 +6,8 @@
     "api/clients.py":        { "maxDuration": 30  },
     "api/webhook_asaas.py":  { "maxDuration": 30  },
     "api/subscribe.py":      { "maxDuration": 30  },
-    "api/admin.py":          { "maxDuration": 30  }
+    "api/admin.py":          { "maxDuration": 30  },
+    "api/public.py":         { "maxDuration": 10  }
   },
   "routes": [
     { "src": "/api/auth(.*)",         "dest": "/api/auth.py"          },
@@ -14,6 +15,7 @@
     { "src": "/api/webhook/asaas",    "dest": "/api/webhook_asaas.py" },
     { "src": "/api/subscribe(.*)",    "dest": "/api/subscribe.py"     },
     { "src": "/api/admin(.*)",        "dest": "/api/admin.py"         },
+    { "src": "/api/public(.*)",       "dest": "/api/public.py"        },
     { "src": "/api/(.*)",             "dest": "/api/$1"               },
     { "src": "/app",                  "dest": "/app.html"             },
     { "src": "/admin/login",          "dest": "/admin-login.html"     },

@@ -8,6 +8,7 @@
 <meta name="keywords" content="download NFS-e sistema nacional, coleta XML NFS-e automatica, baixar NFS-e lote contabilidade, NFS-e downloader certificado digital"/>
 <meta property="og:title" content="FiscalHub — Download Automático de NFS-e"/>
 <meta property="og:description" content="Seu auxiliar fiscal perde horas baixando NFS-e manualmente. O FiscalHub faz isso em 60 segundos."/>
+<script src="/js/meta-pixel.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@700;800&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet"/>
@@ -607,7 +608,7 @@ footer{padding:28px 52px;display:flex;align-items:center;justify-content:space-b
         <div class="plan-feature">ZIP com XMLs + Excel</div>
         <div class="plan-feature">Certificado digital A1 (.pfx)</div>
         <div class="plan-feature">Trial 24h grátis · 1 CNPJ</div>
-        <button class="plan-cta plan-cta-ghost" onclick="window.location.href='/register'">Começar grátis →</button>
+        <button class="plan-cta plan-cta-ghost" onclick="verPlano('Starter');window.location.href='/register'">Começar grátis →</button>
         <div class="plan-trial">Sem cartão de crédito</div>
       </div>
 
@@ -626,7 +627,7 @@ footer{padding:28px 52px;display:flex;align-items:center;justify-content:space-b
         <div class="plan-feature">Filtro Emitidas / Recebidas</div>
         <div class="plan-feature">Excel com classificação automática</div>
         <div class="plan-feature">Suporte prioritário</div>
-        <button class="plan-cta plan-cta-main" onclick="window.location.href='/register'">Começar grátis →</button>
+        <button class="plan-cta plan-cta-main" onclick="verPlano('Pro');window.location.href='/register'">Começar grátis →</button>
         <div class="plan-trial">Trial 24h · 1 CNPJ · sem cartão</div>
       </div>
 
@@ -644,7 +645,7 @@ footer{padding:28px 52px;display:flex;align-items:center;justify-content:space-b
         <div class="plan-feature">Downloads em lote multi-cliente</div>
         <div class="plan-feature">Relatórios avançados por cliente</div>
         <div class="plan-feature">Onboarding dedicado</div>
-        <button class="plan-cta plan-cta-ghost" onclick="window.location.href='/register'">Começar grátis →</button>
+        <button class="plan-cta plan-cta-ghost" onclick="verPlano('Office');window.location.href='/register'">Começar grátis →</button>
         <div class="plan-trial">Sem cartão de crédito</div>
       </div>
 
@@ -950,8 +951,14 @@ function setPlano(modo){
   });
 }
 
+// ── Meta Ads: sinaliza interesse em um plano (ViewContent) ──
+function verPlano(nome){
+  if(window.metaTrack) window.metaTrack('ViewContent', { content_name: nome, content_category: 'pricing_plan' }, window.metaEventId ? window.metaEventId('viewcontent') : undefined);
+}
+
 // ── CTA Plan selector ──
 function irParaCTA(plano){
+  verPlano(plano);
   document.getElementById('f-plano').value=
     plano==='Starter'?'Starter — R$97/mês (até 10 CNPJs)':
     plano==='Pro'?'Pro — R$297/mês (até 50 CNPJs) ⭐ Mais popular':

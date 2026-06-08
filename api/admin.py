@@ -206,6 +206,7 @@ def list_users():
         params.append(plano)
 
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+    mes_atual = datetime.now(timezone.utc).strftime("%Y-%m")
 
     try:
         total = execute(
@@ -216,13 +217,20 @@ def list_users():
             f"""
             SELECT id, nome, email, plano, cnpj_limite, status,
                    trial_expires_at, vitalicio, acesso_expires_at,
-                   plano_origem, is_admin, asaas_customer_id, created_at
+                   plano_origem, is_admin, asaas_customer_id, created_at,
+                   (SELECT COUNT(*) FROM clients c
+                     WHERE c.user_id = users.id)                       AS clientes_count,
+                   COALESCE((SELECT SUM(download_count) FROM monthly_usage m
+                              WHERE m.user_id = users.id), 0)          AS downloads_total,
+                   COALESCE((SELECT SUM(download_count) FROM monthly_usage m
+                              WHERE m.user_id = users.id
+                                AND m.mes = %s), 0)                    AS downloads_mes_atual
               FROM users
               {where_sql}
              ORDER BY created_at DESC
              LIMIT %s OFFSET %s
             """,
-            tuple(params + [page_size, offset]),
+            tuple([mes_atual] + params + [page_size, offset]),
             fetch="all",
         )
 
@@ -242,6 +250,9 @@ def list_users():
                 "is_admin":          bool(r["is_admin"]),
                 "tem_asaas":         bool(r["asaas_customer_id"]),
                 "created_at":        r["created_at"].isoformat() if r["created_at"] else None,
+                "clientes_count":    int(r["clientes_count"] or 0),
+                "downloads_total":   int(r["downloads_total"] or 0),
+                "downloads_mes_atual": int(r["downloads_mes_atual"] or 0),
             })
 
         return jsonify({

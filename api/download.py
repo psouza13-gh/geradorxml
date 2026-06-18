@@ -66,17 +66,24 @@ def parse_nfse(chave: str, nsu: int, xml: str, cnpj_contribuinte: str = "",
         root = ET.fromstring(xml)
         row["NumeroNFSe"]          = _txt(root, "nNFSe")
         row["DataEmissao"]         = _txt(root, "dhEmi", "dEmi", "DataEmissao")[:10]
-        row["Competencia"]         = _txt(root, "dComp", "dtCompetencia", "DataCompetencia",
-                                          "competencia", "Competencia", "CompNfse",
-                                          "dCompetencia", "dhCompetencia")[:10]
+        _comp_raw = _txt(root, "dComp", "dtCompetencia", "DataCompetencia",
+                         "competencia", "Competencia", "CompNfse",
+                         "dCompetencia", "dhCompetencia")[:10]
         # Regex fallback: find dComp tag regardless of XML namespace prefix
-        if not row["Competencia"]:
+        if not _comp_raw:
             m = re.search(r'<(?:[^:>\s]+:)?dComp>(\d{4}-\d{2}(?:-\d{2})?)<', xml)
             if m:
-                row["Competencia"] = m.group(1)[:10]
-        # Final fallback: use emission month (YYYY-MM) when dComp absent from XML
-        if not row["Competencia"] and row["DataEmissao"]:
-            row["Competencia"] = row["DataEmissao"][:7]
+                _comp_raw = m.group(1)[:10]
+        # Final fallback: use emission month when dComp absent from XML
+        if not _comp_raw and row["DataEmissao"]:
+            _comp_raw = row["DataEmissao"][:7]
+        # Format as MM/AAAA (matches portal display; sortable and filterable in Excel)
+        if _comp_raw:
+            _parts = _comp_raw.split("-")
+            if len(_parts) >= 2 and len(_parts[0]) == 4:
+                row["Competencia"] = f"{_parts[1]}/{_parts[0]}"  # YYYY-MM → MM/YYYY
+            else:
+                row["Competencia"] = _comp_raw
         row["CNPJPrestador"]       = _txt(root, "emit//CNPJ", "prestador//CNPJ",
                                           "prest//CNPJ", "Prestador//CNPJ")
         row["NomePrestador"]       = _txt(root, "emit//xNome", "prestador//xNome",

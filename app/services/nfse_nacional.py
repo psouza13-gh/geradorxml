@@ -114,6 +114,7 @@ class NfseNacionalClient:
 
         # ── Phase 2: sequential download ───────────────────────────────────
         results: List[Tuple[str, str]] = []
+        cancelled_chaves: set = set()   # chaves confirmed cancelled via EVENTO docs
         iteracoes = 0
         batches_apos_periodo = 0   # lotes consecutivos 100% após data_final
         notas_apos_periodo = 0
@@ -128,6 +129,10 @@ class NfseNacionalClient:
 
             datas_no_lote: list = []
             for chave, xml, dt_emissao, is_cancelada in batch:
+                # Cancellation event reference injected by _parse_dfe_response
+                if chave.startswith("__CANC__:"):
+                    cancelled_chaves.add(chave[9:])
+                    continue
                 if dt_emissao:
                     datas_no_lote.append(dt_emissao)
                 if dt_emissao is not None and not (data_inicial <= dt_emissao <= data_final):
@@ -160,6 +165,15 @@ class NfseNacionalClient:
 
             nsu = prox_nsu
             time.sleep(1)
+
+        # Cross-reference: mark notes as cancelled if a EVENTO_CANCELAMENTO was received
+        if cancelled_chaves:
+            n_marcadas = sum(1 for c, _, _ in results if c in cancelled_chaves)
+            log(f"  {n_marcadas} nota(s) marcada(s) como cancelada(s) via eventos ADN.")
+            results = [
+                (chave, xml, is_cancelada or (chave in cancelled_chaves))
+                for chave, xml, is_cancelada in results
+            ]
 
         log(f"  ({notas_apos_periodo} nota(s) fora do período ignorada(s))")
         return results
@@ -575,9 +589,24 @@ class NfseNacionalClient:
 
                 for doc in docs:
                     tipo = (doc.get("TipoDocumento") or doc.get("tipoDocumento") or "NFSE").upper()
-                    # Aceita NFS-e normais E canceladas. Descarta apenas EVENTOs puros.
                     if tipo not in ("NFSE", "NFS-E", "NFSE_CANCELADA", "NFS-E_CANCELADA", ""):
-                        log(f"  [ignorado] NSU {doc.get('NSU')} tipo={tipo}")
+                        # Try to extract cancelled chave from cancellation event documents.
+                        # The ADN API distributes cancellations as separate EVENTO docs.
+                        evento_xml = _descompactar_doc(
+                            doc.get("ArquivoXml") or doc.get("docZip") or doc.get("xml") or ""
+                        )
+                        if evento_xml:
+                            chave_canc = _extrair_chave(evento_xml)
+                            if not chave_canc:
+                                # Also try chNFSe tag (common in SPED event XMLs)
+                                chave_canc = _extrair_tag_texto(evento_xml, "chNFSe", "chaveNFSe")
+                            if chave_canc:
+                                batch.append((f"__CANC__:{chave_canc}", "", None, True))
+                                log(f"  [evento cancelamento NSU {doc.get('NSU')}] chave={chave_canc[:30]}")
+                            else:
+                                log(f"  [evento NSU {doc.get('NSU')} tipo={tipo} — chave não extraída]")
+                        else:
+                            log(f"  [ignorado] NSU {doc.get('NSU')} tipo={tipo}")
                         continue
 
                     is_cancelada = "CANCELAD" in tipo
@@ -736,6 +765,17 @@ def _ns(root) -> str:
     """Extract namespace from element tag."""
     if root.tag.startswith("{"):
         return root.tag[1:root.tag.index("}")]
+    return ""
+
+
+def _extrair_tag_texto(xml: str, *tags) -> str:
+    """Extract text of the first matching tag from XML string (namespace-agnostic).
+    Uses simple regex so it works regardless of namespace or prefix."""
+    import re
+    for tag in tags:
+        m = re.search(rf'<(?:[^:>\s]+:)?{re.escape(tag)}[^>]*>([^<]+)<', xml)
+        if m:
+            return m.group(1).strip()
     return ""
 
 

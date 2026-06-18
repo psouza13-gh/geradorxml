@@ -4,7 +4,7 @@ Returns a ZIP containing all NFS-e XMLs + an XLSX summary.
 Certificate is never persisted — only used during the request lifecycle.
 """
 
-import sys, os, io, json, zipfile, tempfile
+import sys, os, io, json, zipfile, tempfile, re
 import xml.etree.ElementTree as ET
 from datetime import date
 
@@ -69,7 +69,12 @@ def parse_nfse(chave: str, nsu: int, xml: str, cnpj_contribuinte: str = "",
         row["Competencia"]         = _txt(root, "dComp", "dtCompetencia", "DataCompetencia",
                                           "competencia", "Competencia", "CompNfse",
                                           "dCompetencia", "dhCompetencia")[:10]
-        # Fallback: use emission month as competência when not explicitly in XML
+        # Regex fallback: find dComp tag regardless of XML namespace prefix
+        if not row["Competencia"]:
+            m = re.search(r'<(?:[^:>\s]+:)?dComp>(\d{4}-\d{2}(?:-\d{2})?)<', xml)
+            if m:
+                row["Competencia"] = m.group(1)[:10]
+        # Final fallback: use emission month (YYYY-MM) when dComp absent from XML
         if not row["Competencia"] and row["DataEmissao"]:
             row["Competencia"] = row["DataEmissao"][:7]
         row["CNPJPrestador"]       = _txt(root, "emit//CNPJ", "prestador//CNPJ",

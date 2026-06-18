@@ -35,7 +35,11 @@ _digits = lambda s: "".join(c for c in s if c.isdigit())
 def _txt(root, *tags) -> str:
     """Find first matching tag (with or without namespace) and return its text."""
     for tag in tags:
-        for candidate in (f"{{{NS}}}{tag}", tag):
+        # Try SPED namespace, any-namespace wildcard ({*}, Python 3.8+), and no namespace.
+        wc = "{*}" + tag if "/" not in tag else None
+        for candidate in (f"{{{NS}}}{tag}", wc, tag):
+            if candidate is None:
+                continue
             el = root.find(f".//{candidate}")
             if el is not None and el.text:
                 return el.text.strip()
@@ -66,8 +70,12 @@ def parse_nfse(chave: str, nsu: int, xml: str, cnpj_contribuinte: str = "",
         root = ET.fromstring(xml)
         row["NumeroNFSe"]          = _txt(root, "nNFSe")
         row["DataEmissao"]         = _txt(root, "dhEmi", "dEmi", "DataEmissao")[:10]
-        row["Competencia"]         = _txt(root, "dComp", "competencia", "Competencia",
-                                          "CompNfse", "dCompetencia", "dhCompetencia")[:10]
+        row["Competencia"]         = _txt(root, "dComp", "dtCompetencia", "DataCompetencia",
+                                          "competencia", "Competencia", "CompNfse",
+                                          "dCompetencia", "dhCompetencia")[:10]
+        # Fallback: use emission month as competência when not explicitly in XML
+        if not row["Competencia"] and row["DataEmissao"]:
+            row["Competencia"] = row["DataEmissao"][:7]
         row["CNPJPrestador"]       = _txt(root, "emit//CNPJ", "prestador//CNPJ",
                                           "prest//CNPJ", "Prestador//CNPJ")
         row["NomePrestador"]       = _txt(root, "emit//xNome", "prestador//xNome",
@@ -85,19 +93,30 @@ def parse_nfse(chave: str, nsu: int, xml: str, cnpj_contribuinte: str = "",
         if not row["CNPJPrestador"]:
             row["CNPJPrestador"] = _txt(root, "CNPJ")
 
-        # Detect cancellation from XML tags (fallback when TipoDocumento not propagated).
-        # Searches in SPED namespace, wildcard namespace ({*}), and no namespace — covers
-        # SPED NFS-e, ABRASF, and municipality-specific variants with different namespaces.
+        # Detect cancellation — three layers, most-to-least specific:
+        # Layer 1 (already set via is_cancelada from TipoDocumento before entering here)
+        # Layer 2: structural XML tags via namespace-aware search
         if not is_cancelada:
             for canc_tag in ("dhCanc", "infCancelamento", "infCanc",
                              "nNFSeCancelamento", "motCancelamento", "motCanc",
-                             "InfPedCan", "infCancNFSe"):
+                             "InfPedCan", "infCancNFSe", "pedCanc", "DtCancelamento"):
                 for candidate in (f"{{{NS}}}{canc_tag}", "{*}" + canc_tag, canc_tag):
                     if root.find(f".//{candidate}") is not None:
                         row["Cancelada"] = "Sim"
                         break
                 if row["Cancelada"] == "Sim":
                     break
+
+        # Layer 3: raw text scan — catches any tag name variant / namespace mismatch.
+        # Lowercases the entire XML once and looks for cancellation-specific tag patterns.
+        if row["Cancelada"] == "Não":
+            xl = xml.lower()
+            if any(p in xl for p in (
+                "<dhcanc", "<infcancelamento", "<infcanc>", "<infcanc ",
+                "<pedcanc", "<dtcancelamento", "<infcancnfse",
+                "<confirmacaocancelamento", ">cancelada<", ">cancelado<",
+            )):
+                row["Cancelada"] = "Sim"
     except ET.ParseError:
         pass
 
@@ -359,12 +378,18 @@ def download():
             contagem[row["Tipo"]] = contagem.get(row["Tipo"], 0) + 1
             if row.get("Cancelada") == "Sim":
                 contagem["Cancelada"] += 1
-        cancelada_info = f" | Canceladas: {contagem['Cancelada']}" if contagem["Cancelada"] else ""
+        n_canceladas = contagem["Cancelada"]
+        n_ativas     = len(xlsx_rows) - n_canceladas
+        cancelada_info = f" | Canceladas (excluídas dos XMLs): {n_canceladas}" if n_canceladas else ""
         messages.append(
-            f"  Resumo: {len(xlsx_rows)} nota(s) exportadas "
+            f"  Resumo: {len(xlsx_rows)} nota(s) no Excel "
             f"[Emitidas: {contagem['Emitida']} | Recebidas: {contagem['Recebida']} | Indefinidas: {contagem['Indefinida']}{cancelada_info}]"
             + (f" — filtro: {tipo_label}" if tipo_label else "")
         )
+        if n_canceladas:
+            messages.append(
+                f"  ZIP: {n_ativas} XML(s) incluído(s) — {n_canceladas} nota(s) cancelada(s) removida(s)."
+            )
 
         # ── Build ZIP (XMLs + XLSX) ─────────────────────────────────────────
         safe_nome   = "".join(c for c in nome if c.isalnum() or c in " _-")[:40]
@@ -376,8 +401,10 @@ def download():
         seen: set = set()
 
         with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            # XML files
-            for i, entry in enumerate(results, 1):
+            # XML files — only active (non-cancelled) notes
+            for entry, row in zip(results, xlsx_rows):
+                if row.get("Cancelada") == "Sim":
+                    continue
                 chave = entry[0]
                 xml   = entry[1]
                 safe_chave = "".join(c for c in str(chave) if c.isalnum())[:44]

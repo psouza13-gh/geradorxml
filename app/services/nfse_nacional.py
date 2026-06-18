@@ -127,13 +127,13 @@ class NfseNacionalClient:
                 break
 
             datas_no_lote: list = []
-            for chave, xml, dt_emissao in batch:
+            for chave, xml, dt_emissao, is_cancelada in batch:
                 if dt_emissao:
                     datas_no_lote.append(dt_emissao)
                 if dt_emissao is not None and not (data_inicial <= dt_emissao <= data_final):
                     notas_apos_periodo += 1
                     continue
-                results.append((chave, xml))
+                results.append((chave, xml, is_cancelada))
                 log(f"  + NFS-e {chave}  [{dt_emissao or 'data?'}]")
 
             if datas_no_lote:
@@ -175,7 +175,7 @@ class NfseNacionalClient:
             batch, _, _ = self._buscar_dfe_batch_silencioso(nsu)
             if not batch:
                 return None
-            datas = [dt for _, _, dt in batch if dt]
+            datas = [dt for _, _, dt, *_ in batch if dt]
             return max(datas) if datas else None
 
         # Step 1: exponential probe to find upper bound
@@ -204,9 +204,9 @@ class NfseNacionalClient:
             else:
                 nsu_low = mid
 
-        # Return with a safety margin of 400 NSUs before the found point
-        result = max(0, nsu_low - 400)
-        log(f"  NSU encontrado: {result} (margem de 400 incluída)")
+        # Return with a safety margin of 1000 NSUs before the found point
+        result = max(0, nsu_low - 1000)
+        log(f"  NSU encontrado: {result} (margem de 1000 incluída)")
         return result
 
     def _buscar_dfe_batch_silencioso(self, nsu: int):
@@ -499,11 +499,15 @@ class NfseNacionalClient:
         retry = 0
         resp = None
         while retry < 3:
+            resp = None
             try:
                 resp = self._get_session().get(url, timeout=60)
             except requests.RequestException as e:
-                log(f"  Erro de conexão: {e}")
-                return [], nsu, True
+                wait = 5 * (retry + 1)
+                log(f"  Erro de conexão: {e} — aguardando {wait}s e tentando novamente ...")
+                time.sleep(wait)
+                retry += 1
+                continue
 
             if resp.status_code == 429:
                 retry_after = int(resp.headers.get("Retry-After", 0))
@@ -512,10 +516,26 @@ class NfseNacionalClient:
                 time.sleep(wait)
                 retry += 1
                 continue
+
+            if resp.status_code >= 500:
+                wait = 5 * (retry + 1)
+                log(f"  Erro HTTP {resp.status_code} — aguardando {wait}s e tentando novamente ...")
+                time.sleep(wait)
+                retry += 1
+                continue
+
             break
 
-        if resp is None or resp.status_code == 429:
+        if resp is None:
+            log("  Falha de conexão persistente após 3 tentativas.")
+            return [], nsu, True
+
+        if resp.status_code == 429:
             log("  Rate limit persistente. Tente novamente mais tarde.")
+            return [], nsu, True
+
+        if resp.status_code >= 500:
+            log(f"  Erro HTTP {resp.status_code} persistente após 3 tentativas.")
             return [], nsu, True
 
         if resp.status_code in (404, 204):
@@ -560,6 +580,7 @@ class NfseNacionalClient:
                         log(f"  [ignorado] NSU {doc.get('NSU')} tipo={tipo}")
                         continue
 
+                    is_cancelada = tipo in ("NFSE_CANCELADA", "NFS-E_CANCELADA")
                     xml = _descompactar_doc(
                         doc.get("ArquivoXml")
                         or doc.get("docZip")
@@ -574,7 +595,7 @@ class NfseNacionalClient:
                     )
                     dt = _extrair_data_emissao(xml)
                     if xml:
-                        batch.append((chave, xml, dt))
+                        batch.append((chave, xml, dt, is_cancelada))
 
                 if docs:
                     ultimo_nsu = max(int(d.get("NSU") or d.get("nsu") or 0) for d in docs)
@@ -610,7 +631,7 @@ class NfseNacionalClient:
                     chave = _extrair_chave(xml) or "sem_chave"
                     dt = _extrair_data_emissao(xml)
                     if xml:
-                        batch.append((chave, xml, dt))
+                        batch.append((chave, xml, dt, False))
 
             except ET.ParseError as e:
                 log(f"  Erro ao interpretar XML: {e}")

@@ -42,11 +42,13 @@ def _txt(root, *tags) -> str:
     return ""
 
 
-def parse_nfse(chave: str, nsu: int, xml: str, cnpj_contribuinte: str = "") -> dict:
+def parse_nfse(chave: str, nsu: int, xml: str, cnpj_contribuinte: str = "",
+               is_cancelada: bool = False) -> dict:
     row = {
         "ChaveAcesso": chave,
         "NSU": nsu,
         "Tipo": "Indefinida",   # Emitida / Recebida / Indefinida
+        "Cancelada": "Sim" if is_cancelada else "Não",
         "NumeroNFSe": "",
         "DataEmissao": "",
         "Competencia": "",
@@ -64,7 +66,8 @@ def parse_nfse(chave: str, nsu: int, xml: str, cnpj_contribuinte: str = "") -> d
         root = ET.fromstring(xml)
         row["NumeroNFSe"]          = _txt(root, "nNFSe")
         row["DataEmissao"]         = _txt(root, "dhEmi", "dEmi", "DataEmissao")[:10]
-        row["Competencia"]         = _txt(root, "dComp", "competencia", "Competencia")[:10]
+        row["Competencia"]         = _txt(root, "dComp", "competencia", "Competencia",
+                                          "CompNfse", "dCompetencia", "dhCompetencia")[:10]
         row["CNPJPrestador"]       = _txt(root, "emit//CNPJ", "prestador//CNPJ",
                                           "prest//CNPJ", "Prestador//CNPJ")
         row["NomePrestador"]       = _txt(root, "emit//xNome", "prestador//xNome",
@@ -81,6 +84,17 @@ def parse_nfse(chave: str, nsu: int, xml: str, cnpj_contribuinte: str = "") -> d
         # Fallback: CNPJ do prestador pode estar no topo do XML
         if not row["CNPJPrestador"]:
             row["CNPJPrestador"] = _txt(root, "CNPJ")
+
+        # Detect cancellation from XML tags (fallback when TipoDocumento not propagated)
+        if not is_cancelada:
+            for canc_tag in ("dhCanc", "infCancelamento", "infCanc",
+                             "nNFSeCancelamento", "motCancelamento", "motCanc"):
+                for candidate in (f"{{{NS}}}{canc_tag}", canc_tag):
+                    if root.find(f".//{candidate}") is not None:
+                        row["Cancelada"] = "Sim"
+                        break
+                if row["Cancelada"] == "Sim":
+                    break
     except ET.ParseError:
         pass
 
@@ -116,7 +130,7 @@ def _filter_by_tipo(results: list, xlsx_rows: list, tipo: str) -> tuple:
         return results, xlsx_rows
 
     keep = {
-        "emitidas":  {"Emitida"},
+        "emitidas":  {"Emitida", "Indefinida"},   # conservative: don't discard unclassifiable
         "recebidas": {"Recebida", "Indefinida"},
     }.get(tipo, {"Emitida", "Recebida", "Indefinida"})
 
@@ -133,6 +147,7 @@ COLUNAS = [
     ("ChaveAcesso",        "Chave de Acesso",          50),
     ("NSU",                "NSU",                       8),
     ("Tipo",               "Tipo",                     12),  # Emitida / Recebida / Indefinida
+    ("Cancelada",          "Cancelada",                10),  # Sim / Não
     ("NumeroNFSe",         "Número NFS-e",             14),
     ("DataEmissao",        "Data Emissão",             14),
     ("Competencia",        "Competência",              14),
@@ -183,19 +198,27 @@ def build_xlsx(rows: list) -> bytes:
         "Recebida":  PatternFill("solid", fgColor="D1ECF1"),  # light blue
         "Indefinida":PatternFill("solid", fgColor="FFF3CD"),  # light yellow
     }
+    cancelada_fill = PatternFill("solid", fgColor="F8D7DA")   # light red for cancelled
 
     # Data rows
     for r, row in enumerate(rows, 2):
         alt = r % 2 == 0
+        is_row_cancelada = row.get("Cancelada") == "Sim"
         for col, (key, _, _) in enumerate(COLUNAS, 1):
             val = row.get(key, "")
             cell = ws.cell(row=r, column=col, value=val)
             cell.border = thin_border
             cell.alignment = Alignment(vertical="center")
             if key == "Tipo":
-                # Always apply tipo color regardless of alternating row
                 cell.fill = tipo_fills.get(val, alt_fill if alt else PatternFill())
                 cell.font = Font(bold=True, size=10)
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            elif key == "Cancelada":
+                if is_row_cancelada:
+                    cell.fill = cancelada_fill
+                    cell.font = Font(bold=True, color="721C24", size=10)
+                else:
+                    cell.fill = alt_fill if alt else PatternFill()
                 cell.alignment = Alignment(horizontal="center", vertical="center")
             elif alt:
                 cell.fill = alt_fill
@@ -304,10 +327,13 @@ def download():
         # ── Parse + classify every note ────────────────────────────────────
         xlsx_rows = []
         for i, entry in enumerate(results):
-            chave   = entry[0]
-            xml     = entry[1]
-            nsu_val = i + 1
-            xlsx_rows.append(parse_nfse(chave, nsu_val, xml, cnpj_contribuinte=cnpj))
+            chave        = entry[0]
+            xml          = entry[1]
+            is_cancelada = bool(entry[2]) if len(entry) > 2 else False
+            nsu_val      = i + 1
+            xlsx_rows.append(parse_nfse(chave, nsu_val, xml,
+                                        cnpj_contribuinte=cnpj,
+                                        is_cancelada=is_cancelada))
 
         # ── Apply tipo filter (after full download — never miss a note) ────
         total_baixadas = len(results)
@@ -325,12 +351,15 @@ def download():
             }), 404
 
         # ── Summary counts by type ──────────────────────────────────────────
-        contagem = {"Emitida": 0, "Recebida": 0, "Indefinida": 0}
+        contagem = {"Emitida": 0, "Recebida": 0, "Indefinida": 0, "Cancelada": 0}
         for row in xlsx_rows:
             contagem[row["Tipo"]] = contagem.get(row["Tipo"], 0) + 1
+            if row.get("Cancelada") == "Sim":
+                contagem["Cancelada"] += 1
+        cancelada_info = f" | Canceladas: {contagem['Cancelada']}" if contagem["Cancelada"] else ""
         messages.append(
             f"  Resumo: {len(xlsx_rows)} nota(s) exportadas "
-            f"[Emitidas: {contagem['Emitida']} | Recebidas: {contagem['Recebida']} | Indefinidas: {contagem['Indefinida']}]"
+            f"[Emitidas: {contagem['Emitida']} | Recebidas: {contagem['Recebida']} | Indefinidas: {contagem['Indefinida']}{cancelada_info}]"
             + (f" — filtro: {tipo_label}" if tipo_label else "")
         )
 

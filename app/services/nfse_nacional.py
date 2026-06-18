@@ -580,7 +580,7 @@ class NfseNacionalClient:
                         log(f"  [ignorado] NSU {doc.get('NSU')} tipo={tipo}")
                         continue
 
-                    is_cancelada = tipo in ("NFSE_CANCELADA", "NFS-E_CANCELADA")
+                    is_cancelada = "CANCELAD" in tipo
                     xml = _descompactar_doc(
                         doc.get("ArquivoXml")
                         or doc.get("docZip")

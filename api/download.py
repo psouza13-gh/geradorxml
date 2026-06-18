@@ -85,11 +85,14 @@ def parse_nfse(chave: str, nsu: int, xml: str, cnpj_contribuinte: str = "",
         if not row["CNPJPrestador"]:
             row["CNPJPrestador"] = _txt(root, "CNPJ")
 
-        # Detect cancellation from XML tags (fallback when TipoDocumento not propagated)
+        # Detect cancellation from XML tags (fallback when TipoDocumento not propagated).
+        # Searches in SPED namespace, wildcard namespace ({*}), and no namespace — covers
+        # SPED NFS-e, ABRASF, and municipality-specific variants with different namespaces.
         if not is_cancelada:
             for canc_tag in ("dhCanc", "infCancelamento", "infCanc",
-                             "nNFSeCancelamento", "motCancelamento", "motCanc"):
-                for candidate in (f"{{{NS}}}{canc_tag}", canc_tag):
+                             "nNFSeCancelamento", "motCancelamento", "motCanc",
+                             "InfPedCan", "infCancNFSe"):
+                for candidate in (f"{{{NS}}}{canc_tag}", "{*}" + canc_tag, canc_tag):
                     if root.find(f".//{candidate}") is not None:
                         row["Cancelada"] = "Sim"
                         break

@@ -1,7 +1,21 @@
 import os
-from flask import Flask, jsonify
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
+
+
+def _require_admin_key() -> bool:
+    """Guard for sensitive health endpoints: require X-Admin-Key header."""
+    key = os.environ.get("ADMIN_HEALTH_KEY", "")
+    if not key:
+        return False
+    return request.headers.get("X-Admin-Key", "") == key
 
 
 @app.route("/api/health")
@@ -13,9 +27,11 @@ def health():
 def health_stripe():
     """
     Diagnostic endpoint — reports which Stripe env vars are present.
-    Returns presence (True/False) and a redacted prefix of each value.
-    Does NOT expose the full values.
+    Requires X-Admin-Key header (ADMIN_HEALTH_KEY env var).
     """
+    if not _require_admin_key():
+        return jsonify({"error": "Unauthorized"}), 401
+
     def _check(var: str) -> dict:
         val = os.environ.get(var, "")
         present = bool(val)
@@ -36,15 +52,19 @@ def health_stripe():
 def health_migrate():
     """
     Run migration_metrics.sql against the database.
+    Requires X-Admin-Key header (ADMIN_HEALTH_KEY env var).
     """
+    if not _require_admin_key():
+        return jsonify({"error": "Unauthorized"}), 401
+
     try:
         from app.services.db import execute
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         migration_path = os.path.join(root, "migration_metrics.sql")
-        
+
         with open(migration_path, "r", encoding="utf-8") as f:
             sql = f.read()
-            
+
         execute(sql)
         return jsonify({"status": "migration completed successfully"})
     except Exception as e:

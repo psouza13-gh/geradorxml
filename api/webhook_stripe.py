@@ -69,7 +69,8 @@ def _activate_plan(
                vitalicio              = FALSE,
                acesso_expires_at      = NULL,
                stripe_customer_id     = %s,
-               stripe_subscription_id = %s
+               stripe_subscription_id = %s,
+               cancelled_at           = NULL
          WHERE id = %s
         """,
         (plano, limite, stripe_customer_id, stripe_subscription_id, user_id),
@@ -198,7 +199,7 @@ def webhook():
         stripe_customer = data.get("customer") or ""
         if stripe_customer:
             execute(
-                "UPDATE users SET status = 'cancelado' WHERE stripe_customer_id = %s",
+                "UPDATE users SET status = 'cancelado', cancelled_at = NOW() WHERE stripe_customer_id = %s",
                 (stripe_customer,),
             )
 

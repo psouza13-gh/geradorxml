@@ -30,3 +30,23 @@ def health_stripe():
         "STRIPE_PRICE_OFFICE":   _check("STRIPE_PRICE_OFFICE"),
         "STRIPE_PRICE_BPO":      _check("STRIPE_PRICE_BPO"),
     })
+
+
+@app.route("/api/health/migrate")
+def health_migrate():
+    """
+    Run migration_metrics.sql against the database.
+    """
+    try:
+        from app.services.db import execute
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        migration_path = os.path.join(root, "migration_metrics.sql")
+        
+        with open(migration_path, "r", encoding="utf-8") as f:
+            sql = f.read()
+            
+        execute(sql)
+        return jsonify({"status": "migration completed successfully"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+

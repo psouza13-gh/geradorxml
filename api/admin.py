@@ -141,6 +141,109 @@ def stats():
             fetch="one",
         )
 
+        # 1. Trial-to-paid conversion rate (excluding admins)
+        converted_row = execute(
+            "SELECT COUNT(*) AS n FROM users WHERE plano_origem IN ('asaas', 'stripe') AND is_admin = FALSE",
+            fetch="one"
+        )
+        converted_count = converted_row["n"] if converted_row else 0
+
+        eligible_row = execute(
+            """
+            SELECT COUNT(*) AS n FROM users
+             WHERE is_admin = FALSE
+               AND (plano_origem IN ('asaas', 'stripe')
+                    OR (plano = 'trial' AND (trial_expires_at < NOW() OR trial_expires_at IS NULL)))
+            """,
+            fetch="one"
+        )
+        eligible_count = eligible_row["n"] if eligible_row else 0
+        trial_conversion_rate = (converted_count / eligible_count * 100) if eligible_count > 0 else 0.0
+
+        # 2. Churn Rate (last 30 days)
+        cancelados_30d_row = execute(
+            """
+            SELECT COUNT(*) AS n FROM users
+             WHERE status = 'cancelado'
+               AND plano_origem IN ('asaas', 'stripe')
+               AND cancelled_at >= NOW() - INTERVAL '30 days'
+            """,
+            fetch="one"
+        )
+        cancelados_30d = cancelados_30d_row["n"] if cancelados_30d_row else 0
+
+        ativos_row = execute(
+            """
+            SELECT COUNT(*) AS n FROM users
+             WHERE status IN ('ativo', 'suspenso')
+               AND plano_origem IN ('asaas', 'stripe')
+            """,
+            fetch="one"
+        )
+        ativos_count = ativos_row["n"] if ativos_row else 0
+
+        total_churn_base = ativos_count + cancelados_30d
+        churn_rate = (cancelados_30d / total_churn_base * 100) if total_churn_base > 0 else 0.0
+
+        # 3. Estimated LTV
+        arpu = (mrr / ativos_count) if ativos_count > 0 else 0.0
+        if churn_rate > 0:
+            ltv = arpu / (churn_rate / 100.0)
+        else:
+            # Fallback to lifetime churn to avoid infinity
+            total_cancelados_row = execute(
+                "SELECT COUNT(*) AS n FROM users WHERE status = 'cancelado' AND plano_origem IN ('asaas', 'stripe')",
+                fetch="one"
+            )
+            total_cancelados = total_cancelados_row["n"] if total_cancelados_row else 0
+            lifetime_churn_base = ativos_count + total_cancelados
+            lifetime_churn = (total_cancelados / lifetime_churn_base * 100) if lifetime_churn_base > 0 else 0.0
+            
+            if lifetime_churn > 0:
+                ltv = arpu / (lifetime_churn / 100.0)
+            else:
+                ltv = arpu * 24.0
+
+        # 4. Revenue Distribution per Plan
+        receita_dist = {}
+        for p_id, p_info in _PLANOS.items():
+            p_count_row = execute(
+                """
+                SELECT COUNT(*) AS n FROM users
+                 WHERE status IN ('ativo', 'suspenso')
+                   AND plano_origem IN ('asaas', 'stripe')
+                   AND plano = %s
+                """,
+                (p_id,),
+                fetch="one"
+            )
+            p_count = p_count_row["n"] if p_count_row else 0
+            p_val = p_info.get("valor", 0.0)
+            p_mrr = p_count * p_val
+            receita_dist[p_id] = {
+                "mrr": round(p_mrr, 2),
+                "count": p_count,
+                "pct": round((p_mrr / mrr * 100) if mrr > 0 else 0.0, 1)
+            }
+
+        # 5. Download Success/Failure Rate (Error Rate) - Last 30 days
+        try:
+            sucessos_row = execute(
+                "SELECT COUNT(*) AS n FROM download_logs WHERE sucesso = TRUE AND created_at >= NOW() - INTERVAL '30 days'",
+                fetch="one"
+            )
+            falhas_row = execute(
+                "SELECT COUNT(*) AS n FROM download_logs WHERE sucesso = FALSE AND created_at >= NOW() - INTERVAL '30 days'",
+                fetch="one"
+            )
+            sucessos = sucessos_row["n"] if sucessos_row else 0
+            falhas = falhas_row["n"] if falhas_row else 0
+            total_downloads_30d = sucessos + falhas
+            download_error_rate = (falhas / total_downloads_30d * 100) if total_downloads_30d > 0 else 0.0
+        except Exception:
+            total_downloads_30d = 0
+            download_error_rate = 0.0
+
         # Usage this month
         mes = datetime.now(timezone.utc).strftime("%Y-%m")
         uso_row = execute(
@@ -164,6 +267,11 @@ def stats():
             "acessos_vitalicios":   vitalicios_row["n"],
             "acessos_temporarios":  temporarios_row["n"],
             "novos_30d":            novos_row["n"],
+            "metrica_conversao_trial": round(trial_conversion_rate, 2),
+            "metrica_churn_rate":      round(churn_rate, 2),
+            "metrica_ltv_estimado":    round(ltv, 2),
+            "metrica_error_rate":      round(download_error_rate, 2),
+            "receita_por_plano":        receita_dist,
             "uso_mes": {
                 "mes":             mes,
                 "downloads":       int(uso_row["downloads"]),
@@ -432,10 +540,11 @@ def delete_subscription(user_id):
                    vitalicio         = FALSE,
                    acesso_expires_at = NULL,
                    plano_origem      = 'trial',
-                   trial_expires_at  = %s
+                   trial_expires_at  = %s,
+                   cancelled_at      = %s
              WHERE id = %s
             """,
-            (now - timedelta(seconds=1), user_id),
+            (now - timedelta(seconds=1), now, user_id),
         )
         return jsonify({"ok": True, "msg": "Assinatura removida. Conta voltou ao estado padrão (cancelada/sem plano ativo)."})
     except Exception as exc:

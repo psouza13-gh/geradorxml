@@ -39,12 +39,24 @@
 <main id="content" class="hidden max-w-7xl mx-auto p-6 space-y-6">
 
   <!-- ── SUMMARY CARDS ─────────────────────────────────── -->
-  <section>
-    <h1 class="text-lg font-semibold text-white mb-1">Painel do administrador</h1>
-    <p class="text-xs text-gray-500 mb-4">Visão geral de usuários, assinaturas, faturamento e uso da plataforma.</p>
+  <section class="space-y-5">
+    <div>
+      <h1 class="text-lg font-semibold text-white mb-1">Painel do administrador</h1>
+      <p class="text-xs text-gray-500">Visão geral de usuários, assinaturas, faturamento e uso da plataforma.</p>
+    </div>
 
-    <div id="cards" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-      <!-- filled by JS -->
+    <div class="space-y-2">
+      <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider">Visão Geral</h3>
+      <div id="cards" class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <!-- filled by JS -->
+      </div>
+    </div>
+
+    <div class="space-y-2">
+      <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider">Métricas SaaS & Operações</h3>
+      <div id="saas-cards" class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <!-- filled by JS -->
+      </div>
     </div>
   </section>
 
@@ -484,20 +496,38 @@ function _renderCards(s) {
     _card('Downloads no mês', s.uso_mes.downloads, `${s.uso_mes.mes} · ${s.uso_mes.cnpjs_unicos} CNPJs únicos`),
     _card('Usuários ativos no mês', s.uso_mes.usuarios_ativos, 'Realizaram ao menos 1 download'),
   ].join('');
+
+  $('saas-cards').innerHTML = [
+    _card('Taxa de Conversão do Trial', `${s.metrica_conversao_trial}%`, 'Trial → Assinante pago', 'text-blue-400'),
+    _card('Churn Rate (Mensal)', `${s.metrica_churn_rate}%`, 'Cancelados nos últimos 30 dias', s.metrica_churn_rate > 5 ? 'text-red-400' : 'text-green-400'),
+    _card('LTV Estimado', fmtMoney(s.metrica_ltv_estimado), 'Valor médio de vida do cliente', 'text-emerald-400'),
+    _card('Taxa de Erro de Download', `${s.metrica_error_rate}%`, 'Falhas nos últimos 30 dias', s.metrica_error_rate > 10 ? 'text-rose-400' : 'text-teal-400'),
+  ].join('');
 }
 
 function _renderPlanBreakdown(s) {
   const total = s.total_usuarios || 1;
   const ordem = ['trial','starter','pro','office','bpo'];
+  
   $('plan-breakdown').innerHTML = ordem.map(p => {
     const n = s.por_plano[p] || 0;
     const pct = Math.round((n/total) * 100);
-    return `<div class="flex items-center gap-3">
-      <span class="w-16 text-gray-400">${PLANO_LABEL[p]}</span>
-      <div class="flex-1 bg-gray-800 rounded-full h-2 overflow-hidden">
+    
+    let revenue_info = '';
+    if (p !== 'trial' && s.receita_por_plano && s.receita_por_plano[p]) {
+      const dist = s.receita_por_plano[p];
+      revenue_info = `<span class="w-48 text-right text-amber-400 font-semibold">${fmtMoney(dist.mrr)} (${dist.pct}% do MRR)</span>`;
+    } else if (p === 'trial') {
+      revenue_info = `<span class="w-48 text-right text-gray-500">—</span>`;
+    }
+    
+    return `<div class="flex items-center gap-3 py-1.5 border-b border-gray-800/40 last:border-b-0">
+      <span class="w-20 text-gray-300 font-medium">${PLANO_LABEL[p]}</span>
+      <div class="flex-1 bg-gray-800 rounded-full h-2.5 overflow-hidden">
         <div class="h-full rounded-full bg-amber-500" style="width:${pct}%"></div>
       </div>
-      <span class="w-20 text-right text-gray-400">${n} (${pct}%)</span>
+      <span class="w-24 text-right text-gray-400">${n} usuário(s) (${pct}%)</span>
+      ${revenue_info}
     </div>`;
   }).join('');
 }

@@ -19,10 +19,21 @@ from app.services.nfse_nacional import NfseNacionalClient
 from app.services import cert_handler as _ch
 from app.services.auth_service import verify_token
 from app.services.subscription_service import verificar_e_registrar_download
+from app.services.db import execute
 
 app = Flask(__name__)
 
 MAX_CERT_BYTES = 1 * 1024 * 1024  # 1 MB
+
+
+def _log_download(user_id: str, cnpj: str, sucesso: bool, erro: str = None) -> None:
+    try:
+        execute(
+            "INSERT INTO download_logs (user_id, cnpj, sucesso, erro) VALUES (%s, %s, %s, %s)",
+            (user_id, cnpj, sucesso, erro),
+        )
+    except Exception:
+        pass
 
 
 # ── NFS-e XML parser ─────────────────────────────────────────────────────────
@@ -316,8 +327,10 @@ def download():
         try:
             info = get_cert_info(tmp_cert_path, password)
             if info.get("vencido"):
+                _log_download(user_id, cnpj, False, "Certificado vencido")
                 return jsonify({"error": f"Certificado vencido em {info['validade']}."}), 400
         except Exception:
+            _log_download(user_id, cnpj, False, "Certificado inválido ou senha incorreta")
             return jsonify({"error": "Certificado inválido ou senha incorreta."}), 400
 
         client = NfseNacionalClient(
@@ -333,9 +346,11 @@ def download():
                 tipo_scraping=tipo_nfse,
             )
         except RuntimeError as e:
+            _log_download(user_id, cnpj, False, str(e))
             return jsonify({"error": str(e), "log": messages}), 400
 
         if not results:
+            _log_download(user_id, cnpj, True, "Nenhuma NFS-e encontrada")
             return jsonify({
                 "error": "Nenhuma NFS-e encontrada para o período informado.",
                 "log": messages,
@@ -358,6 +373,7 @@ def download():
 
         tipo_label = {"emitidas": "emitidas", "recebidas": "recebidas"}.get(tipo_nfse, "")
         if not results:
+            _log_download(user_id, cnpj, True, "Filtro tipo removeu tudo")
             tipo_msg = f" {tipo_label}" if tipo_label else ""
             return jsonify({
                 "error": (
@@ -418,6 +434,7 @@ def download():
             zf.writestr(f"NFS-e_{cnpj}_{periodo}{tipo_suffix}.xlsx", xlsx_bytes)
 
         zip_buf.seek(0)
+        _log_download(user_id, cnpj, True)
         return send_file(zip_buf, mimetype="application/zip",
                          as_attachment=True, download_name=zip_name)
 

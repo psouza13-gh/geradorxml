@@ -751,8 +751,6 @@ function _subShowError(msg) {
 function openSubscribeModal() {
   _renderSubPlanos();
   _subPlanoSelecionado = null;
-  $('sub-cpfcnpj').value = '';
-  $('sub-billing').value = 'UNDEFINED';
   _subShowError(null);
   // Pre-select plan based on user's current plan, defaulting to "pro"
   const cached = localStorage.getItem(USER_KEY);

@@ -649,13 +649,23 @@ class NfseNacionalClient:
         else:
             try:
                 root = ET.fromstring(resp.text)
-                prox_nsu_el = root.find(".//{*}proxNSU") or root.find(".//proxNSU")
-                max_nsu_el = root.find(".//{*}maxNSU") or root.find(".//maxNSU")
+                ns = _ns(root)
+
+                def _find_el(tag):
+                    if ns:
+                        el = root.find(f".//{{{ns}}}{tag}")
+                        if el is not None:
+                            return el
+                    return root.find(f".//{tag}")
+
+                prox_nsu_el = _find_el("proxNSU")
+                max_nsu_el  = _find_el("maxNSU")
                 prox_nsu = int(prox_nsu_el.text) if prox_nsu_el is not None else 0
-                max_nsu = int(max_nsu_el.text) if max_nsu_el is not None else 0
+                max_nsu  = int(max_nsu_el.text)  if max_nsu_el  is not None else 0
                 fim = prox_nsu >= max_nsu if max_nsu else False
 
-                for doc_el in list(root.iter("{*}docZip")) or list(root.iter("docZip")):
+                _doczip_tag = f"{{{ns}}}docZip" if ns else "docZip"
+                for doc_el in list(root.iter(_doczip_tag)) or list(root.iter("docZip")):
                     xml = _descompactar_doc(doc_el.text or "")
                     chave = _extrair_chave(xml) or "sem_chave"
                     dt = _extrair_data_emissao(xml)

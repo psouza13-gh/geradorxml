@@ -105,21 +105,21 @@ def stats():
         )
         por_origem = {r["plano_origem"]: r["n"] for r in (por_origem_rows or [])}
 
-        # Paying subscribers = active, paid plan, billed via ASAAS
+        # Paying subscribers = active, paid plan, billed via ASAAS or Stripe
         pagantes_row = execute(
             """
             SELECT COUNT(*) AS n FROM users
-             WHERE status = 'ativo' AND plano <> 'trial' AND plano_origem = 'asaas'
+             WHERE status = 'ativo' AND plano <> 'trial' AND plano_origem IN ('asaas', 'stripe')
             """,
             fetch="one",
         )
         pagantes = pagantes_row["n"]
 
-        # MRR — sum of plan prices for active ASAAS-billed subscribers
+        # MRR — sum of plan prices for active ASAAS or Stripe-billed subscribers
         mrr_rows = execute(
             """
             SELECT plano, COUNT(*) AS n FROM users
-             WHERE status = 'ativo' AND plano <> 'trial' AND plano_origem = 'asaas'
+             WHERE status = 'ativo' AND plano <> 'trial' AND plano_origem IN ('asaas', 'stripe')
              GROUP BY plano
             """,
             fetch="all",

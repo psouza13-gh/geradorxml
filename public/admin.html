@@ -293,6 +293,7 @@ const STATUS_COLOR = {
 const ORIGEM_LABEL = {
   trial:             'Trial',
   asaas:             'Assinatura (ASAAS)',
+  stripe:            'Assinatura (Stripe)',
   admin_temporario:  'Concedido — temporário',
   admin_vitalicio:   'Concedido — vitalício',
 };
@@ -475,7 +476,7 @@ function _renderCards(s) {
 
   $('cards').innerHTML = [
     _card('Usuários totais', s.total_usuarios, `+${s.novos_30d} nos últimos 30 dias`),
-    _card('Assinantes pagantes', s.assinantes_pagantes, 'Ativos via ASAAS', 'text-green-400'),
+    _card('Assinantes pagantes', s.assinantes_pagantes, 'Ativos via Stripe/Asaas', 'text-green-400'),
     _card('MRR estimado', fmtMoney(s.mrr_estimado), 'Receita recorrente mensal', 'text-amber-400'),
     _card('Trials ativos', trials, 'Período de avaliação 24h'),
     _card('Acessos concedidos', `${s.acessos_vitalicios} vit. / ${s.acessos_temporarios} temp.`, 'Vitalícios e temporários (admin)', 'text-violet-400'),

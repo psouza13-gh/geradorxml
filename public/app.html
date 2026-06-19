@@ -63,7 +63,7 @@
 </div>
 
 <!-- ══════════════════════════════════════════════════════
-     MODAL: ASSINAR PLANO (ASAAS checkout)
+     MODAL: ASSINAR PLANO (Stripe Checkout)
 ══════════════════════════════════════════════════════ -->
 <div id="sub-modal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/70 px-4"
   onclick="if(event.target===this) closeSubscribeModal()">
@@ -80,27 +80,11 @@
       <div id="sub-planos" class="grid grid-cols-2 gap-2"></div>
     </div>
 
-    <div>
-      <label for="sub-cpfcnpj" class="block text-xs font-medium text-gray-400 mb-1.5">CPF ou CNPJ (cobrança)</label>
-      <input id="sub-cpfcnpj" type="text" inputmode="numeric" placeholder="Somente números"
-        class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"/>
-    </div>
-
-    <div>
-      <label class="block text-xs font-medium text-gray-400 mb-1.5">Forma de pagamento</label>
-      <select id="sub-billing" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
-        <option value="UNDEFINED">Escolher na próxima tela (cartão, boleto ou PIX)</option>
-        <option value="CREDIT_CARD">Cartão de crédito</option>
-        <option value="PIX">PIX</option>
-        <option value="BOLETO">Boleto</option>
-      </select>
-    </div>
-
     <button id="sub-submit" onclick="submitSubscription()"
       class="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:text-gray-400 text-white font-semibold text-sm py-2.5 rounded-lg transition flex items-center justify-center gap-2">
-      <span id="sub-submit-txt">Continuar para pagamento</span>
+      <span id="sub-submit-txt">Continuar para pagamento →</span>
     </button>
-    <p class="text-[11px] text-gray-500 text-center">Você será redirecionado ao ambiente seguro do ASAAS para concluir o pagamento.</p>
+    <p class="text-[11px] text-gray-500 text-center">Você será redirecionado ao ambiente seguro do Stripe para concluir o pagamento (cartão ou boleto).</p>
   </div>
 </div>
 
@@ -799,12 +783,6 @@ async function submitSubscription() {
   _subShowError(null);
 
   if(!_subPlanoSelecionado) { _subShowError('Selecione um plano.'); return; }
-  const cpfCnpj = stripCNPJ($('sub-cpfcnpj').value);
-  if(cpfCnpj.length !== 11 && cpfCnpj.length !== 14) {
-    _subShowError('Informe um CPF (11 dígitos) ou CNPJ (14 dígitos) válido.');
-    return;
-  }
-  const billingType = $('sub-billing').value;
 
   const btn = $('sub-submit');
   const txt = $('sub-submit-txt');
@@ -815,7 +793,7 @@ async function submitSubscription() {
     const resp = await fetch('/api/subscribe', {
       method: 'POST',
       headers: { ...authHdrs(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ plano: _subPlanoSelecionado, cpfCnpj, billingType }),
+      body: JSON.stringify({ plano: _subPlanoSelecionado }),
     });
     const data = await resp.json().catch(()=>({}));
 
@@ -826,11 +804,9 @@ async function submitSubscription() {
       return;
     }
     if(data.checkout_url) {
-      txt.textContent = 'Redirecionando…';
+      txt.textContent = 'Redirecionando para o Stripe…';
 
-      // Meta Ads: usuário iniciou o checkout (InitiateCheckout) — dispara
-      // antes do redirect para o ASAAS, com o mesmo event_id padrão usado
-      // pelo CAPI (caso o backend venha a reutilizá-lo no futuro p/ dedup).
+      // Meta Ads: usuário iniciou o checkout (InitiateCheckout)
       if(window.metaTrack) {
         const _VALORES_PLANO = { starter: 97, pro: 297, office: 597, bpo: 997 };
         window.metaTrack('InitiateCheckout', {
@@ -844,12 +820,12 @@ async function submitSubscription() {
       window.location.href = data.checkout_url;
       return;
     }
-    _subShowError(data.error || 'Assinatura criada! Atualize a página em alguns instantes para continuar.');
+    _subShowError(data.error || 'Erro ao iniciar assinatura. Tente novamente.');
   } catch(e) {
     _subShowError('Erro de conexão. Tente novamente.');
   } finally {
     btn.disabled = false;
-    txt.textContent = 'Continuar para pagamento';
+    txt.textContent = 'Continuar para pagamento →';
   }
 }
 
@@ -866,6 +842,19 @@ async function submitSubscription() {
 
   showTab('download');
   refreshClientSelect();   // non-blocking: show quickly from cache
+
+  // Handle Stripe Checkout redirect callbacks
+  const params = new URLSearchParams(window.location.search);
+  const subStatus = params.get('subscription');
+  if(subStatus === 'success') {
+    // Clear the URL param without reloading
+    window.history.replaceState({}, '', '/app');
+    showStatus('success', '✓ Pagamento confirmado! Seu plano foi ativado. Bem-vindo(a)!');
+    loadUserInfo();
+  } else if(subStatus === 'cancelled') {
+    window.history.replaceState({}, '', '/app');
+    showStatus('info', 'Pagamento não finalizado. Seu plano não foi alterado. Tente novamente quando quiser.');
+  }
 
   loadUserInfo();           // load user info in background
 })();

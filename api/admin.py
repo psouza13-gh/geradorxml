@@ -217,7 +217,8 @@ def list_users():
             f"""
             SELECT id, nome, email, plano, cnpj_limite, status,
                    trial_expires_at, vitalicio, acesso_expires_at,
-                   plano_origem, is_admin, asaas_customer_id, created_at,
+                   plano_origem, is_admin, asaas_customer_id,
+                   stripe_customer_id, created_at,
                    (SELECT COUNT(*) FROM clients c
                      WHERE c.user_id = users.id)                       AS clientes_count,
                    COALESCE((SELECT SUM(download_count) FROM monthly_usage m
@@ -248,7 +249,7 @@ def list_users():
                 "acesso_expires_at": r["acesso_expires_at"].isoformat() if r["acesso_expires_at"] else None,
                 "plano_origem":      r["plano_origem"],
                 "is_admin":          bool(r["is_admin"]),
-                "tem_asaas":         bool(r["asaas_customer_id"]),
+                "tem_stripe":        bool(r["stripe_customer_id"]),
                 "created_at":        r["created_at"].isoformat() if r["created_at"] else None,
                 "clientes_count":    int(r["clientes_count"] or 0),
                 "downloads_total":   int(r["downloads_total"] or 0),

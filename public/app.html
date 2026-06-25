@@ -523,8 +523,12 @@ function renderUserBar(user) {
       const mins = Math.round((exp-now)/60000);
       const hrs  = Math.floor(mins/60);
       const rem  = mins % 60;
-      const timeStr = hrs > 0 ? `${hrs}h${rem > 0 ? rem+'min' : ''}` : `${mins} min`;
-      msg.textContent = `Trial ativo — ${timeStr} restantes · 1 CNPJ.`;
+      const days = Math.floor(hrs/24);
+      const remHrs = hrs % 24;
+      const timeStr = days > 0
+        ? `${days}d${remHrs > 0 ? remHrs+'h' : ''}`
+        : (hrs > 0 ? `${hrs}h${rem > 0 ? rem+'min' : ''}` : `${mins} min`);
+      msg.textContent = `Trial ativo — ${timeStr} restantes · 2 CNPJs.`;
     } else {
       msg.textContent = `Seu trial expirou. Assine um plano para continuar baixando NFS-e.`;
     }
@@ -707,13 +711,13 @@ async function refreshClientSelect() {
 }
 
 // ════════════════════════════════════════════════════════
-//  SUBSCRIBE (ASAAS checkout)
+//  SUBSCRIBE (Stripe checkout)
 // ════════════════════════════════════════════════════════
 const SUB_PLANOS = [
-  { id: 'starter', nome: 'Starter', preco: 'R$ 97/mês',  desc: 'Até 10 CNPJs/mês'      },
-  { id: 'pro',     nome: 'Pro',     preco: 'R$ 297/mês', desc: 'Até 50 CNPJs/mês'      },
-  { id: 'office',  nome: 'Office',  preco: 'R$ 597/mês', desc: 'Até 150 CNPJs/mês'     },
-  { id: 'bpo',     nome: 'BPO',     preco: 'R$ 997/mês', desc: 'Ilimitado + API'       },
+  { id: 'starter', nome: 'Starter', preco: 'R$ 67/mês',  desc: 'Até 15 CNPJs/mês'      },
+  { id: 'pro',     nome: 'Pro',     preco: 'R$ 147/mês', desc: 'Até 50 CNPJs/mês'      },
+  { id: 'office',  nome: 'Office',  preco: 'R$ 297/mês', desc: 'Até 150 CNPJs/mês'     },
+  { id: 'bpo',     nome: 'BPO',     preco: 'R$ 597/mês', desc: 'Ilimitado + API'       },
 ];
 
 let _subPlanoSelecionado = null;
@@ -806,7 +810,7 @@ async function submitSubscription() {
 
       // Meta Ads: usuário iniciou o checkout (InitiateCheckout)
       if(window.metaTrack) {
-        const _VALORES_PLANO = { starter: 97, pro: 297, office: 597, bpo: 997 };
+        const _VALORES_PLANO = { starter: 67, pro: 147, office: 297, bpo: 597 };
         window.metaTrack('InitiateCheckout', {
           content_name: _subPlanoSelecionado,
           content_category: 'subscription_checkout',

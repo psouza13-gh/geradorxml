@@ -263,7 +263,7 @@ def track_lead(*, user_id: str, email: str | None, telefone: str | None = None,
 def track_trial_start(*, user_id: str, email: str | None, telefone: str | None = None,
                        event_source_url: str | None = None,
                        client_ip: str | None = None, client_user_agent: str | None = None) -> dict:
-    """Fire when a free-trial account is activated (24h / 1 CNPJ)."""
+    """Fire when a free-trial account is activated (3 dias / 2 CNPJs)."""
     settings = get_settings()
     if not settings["events"].get("trial", True):
         return {"ok": False, "skipped": "event_disabled"}

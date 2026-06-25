@@ -2,13 +2,13 @@
 Subscription / plan enforcement logic.
 
 Trial rules:
-  - 24h from registration
-  - 1 CNPJ slot
-  - CNPJ locks on the FIRST DOWNLOAD (not at registration)
-  - After first download, the locked client cannot be edited or deleted
+  - 3 days from registration
+  - 2 CNPJ slots (counted by distinct CNPJs actually downloaded)
+  - First CNPJ also recorded in trial_locked_cnpj (back-compat with the
+    client-edit lock and the UI "locked" badge)
 
 Paid plan limits (CNPJs per month):
-  starter  →  10
+  starter  →  15
   pro      →  50
   office   → 150
   bpo      →  -1  (unlimited)
@@ -18,9 +18,12 @@ from datetime import datetime, timezone
 from app.services.db import execute
 
 
+# Number of distinct CNPJs allowed during the free trial.
+TRIAL_CNPJ_LIMIT = 2
+
 PLANO_LIMITES: dict[str, int] = {
-    "trial":   1,
-    "starter": 10,
+    "trial":   TRIAL_CNPJ_LIMIT,
+    "starter": 15,
     "pro":     50,
     "office":  150,
     "bpo":     -1,
@@ -94,20 +97,34 @@ def verificar_e_registrar_download(user_id: str, cnpj: str) -> tuple[bool, str]:
             if now > trial_expires:
                 return (
                     False,
-                    "Seu trial de 24h expirou. Assine um plano para continuar.",
+                    "Seu período de teste de 3 dias expirou. Assine um plano para continuar.",
                 )
 
-        # ── Trial CNPJ lock ────────────────────────────────────────────────
-        locked_cnpj = user["trial_locked_cnpj"]
+        # ── Trial CNPJ limit (up to TRIAL_CNPJ_LIMIT distinct CNPJs) ────────
+        # Count distinct CNPJs already used by this user across all months
+        # (a trial only lasts 3 days, so an all-time count is the lifetime set).
+        cnpjs_usados = execute(
+            "SELECT DISTINCT cnpj FROM monthly_usage WHERE user_id = %s",
+            (user_id,),
+            fetch="all",
+        )
+        cnpjs_set = {r["cnpj"] for r in (cnpjs_usados or [])}
+        # Back-compat: a legacy trial may have a locked CNPJ recorded before
+        # its first monthly_usage row existed.
+        locked_cnpj = user.get("trial_locked_cnpj")
         if locked_cnpj:
-            if locked_cnpj != cnpj:
-                return (
-                    False,
-                    f"No trial apenas 1 CNPJ é permitido (já vinculado: "
-                    f"{locked_cnpj[:2]}***/0001-**). Assine um plano para adicionar mais CNPJs.",
-                )
-        else:
-            # First download — lock this CNPJ
+            cnpjs_set.add(locked_cnpj)
+
+        if cnpj not in cnpjs_set and len(cnpjs_set) >= TRIAL_CNPJ_LIMIT:
+            return (
+                False,
+                f"No período de teste você pode usar até {TRIAL_CNPJ_LIMIT} CNPJs. "
+                f"Assine um plano para adicionar mais CNPJs.",
+            )
+
+        # Keep trial_locked_cnpj pointing to the FIRST CNPJ used (back-compat
+        # with the client edit/delete lock and the "locked" badge in the UI).
+        if not locked_cnpj:
             execute(
                 "UPDATE users SET trial_locked_cnpj = %s WHERE id = %s",
                 (cnpj, user_id),

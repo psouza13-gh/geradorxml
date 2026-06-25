@@ -217,11 +217,11 @@
       <div>
         <label class="block text-[11px] font-medium text-gray-400 mb-1.5">Plano base</label>
         <select id="m-plano" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500">
-          <option value="starter">Starter — R$ 97/mês (10 CNPJs)</option>
-          <option value="pro" selected>Pro — R$ 297/mês (50 CNPJs)</option>
-          <option value="office">Office — R$ 597/mês (150 CNPJs)</option>
-          <option value="bpo">BPO — R$ 997/mês (ilimitado)</option>
-          <option value="trial">Trial — (1 CNPJ)</option>
+          <option value="starter">Starter — R$ 67/mês (15 CNPJs)</option>
+          <option value="pro" selected>Pro — R$ 147/mês (50 CNPJs)</option>
+          <option value="office">Office — R$ 297/mês (150 CNPJs)</option>
+          <option value="bpo">BPO — R$ 597/mês (ilimitado)</option>
+          <option value="trial">Trial — (2 CNPJs)</option>
         </select>
       </div>
 
@@ -490,7 +490,7 @@ function _renderCards(s) {
     _card('Usuários totais', s.total_usuarios, `+${s.novos_30d} nos últimos 30 dias`),
     _card('Assinantes pagantes', s.assinantes_pagantes, 'Ativos via Stripe/Asaas', 'text-green-400'),
     _card('MRR estimado', fmtMoney(s.mrr_estimado), 'Receita recorrente mensal', 'text-amber-400'),
-    _card('Trials ativos', trials, 'Período de avaliação 24h'),
+    _card('Trials ativos', trials, 'Período de avaliação 3 dias'),
     _card('Acessos concedidos', `${s.acessos_vitalicios} vit. / ${s.acessos_temporarios} temp.`, 'Vitalícios e temporários (admin)', 'text-violet-400'),
     _card('Suspensos / Congelados / Cancelados', `${suspensos} / ${congelados} / ${cancelados}`, 'Atenção necessária', (suspensos+congelados+cancelados) > 0 ? 'text-orange-400' : 'text-white'),
     _card('Downloads no mês', s.uso_mes.downloads, `${s.uso_mes.mes} · ${s.uso_mes.cnpjs_unicos} CNPJs únicos`),

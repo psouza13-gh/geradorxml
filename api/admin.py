@@ -45,11 +45,11 @@ def _cors(resp):
 
 # Plan catalog — keep in sync with api/subscribe.py and subscription_service.PLANO_LIMITES
 _PLANOS = {
-    "trial":   {"valor": 0.0,   "limite": 1},
-    "starter": {"valor": 97.0,  "limite": 10},
-    "pro":     {"valor": 297.0, "limite": 50},
-    "office":  {"valor": 597.0, "limite": 150},
-    "bpo":     {"valor": 997.0, "limite": -1},
+    "trial":   {"valor": 0.0,   "limite": 2},
+    "starter": {"valor": 67.0,  "limite": 15},
+    "pro":     {"valor": 147.0, "limite": 50},
+    "office":  {"valor": 297.0, "limite": 150},
+    "bpo":     {"valor": 597.0, "limite": -1},
 }
 
 _STATUSES = {"ativo", "suspenso", "cancelado", "congelado"}

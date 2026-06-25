@@ -29,7 +29,7 @@ app = Flask(__name__)
 
 # ── Plan limits (keep in sync with subscription_service.PLANO_LIMITES) ────────
 _LIMITES: dict[str, int] = {
-    "starter": 10,
+    "starter": 15,
     "pro":     50,
     "office":  150,
     "bpo":     -1,
@@ -37,10 +37,10 @@ _LIMITES: dict[str, int] = {
 
 # Monthly values in BRL — reported to Meta Ads Conversions API on first purchase
 _VALORES: dict[str, float] = {
-    "starter": 97.0,
-    "pro":     297.0,
-    "office":  597.0,
-    "bpo":     997.0,
+    "starter": 67.0,
+    "pro":     147.0,
+    "office":  297.0,
+    "bpo":     597.0,
 }
 
 

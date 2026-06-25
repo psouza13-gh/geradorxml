@@ -78,7 +78,7 @@ def cpf_already_registered(cpf: str) -> bool:
 def create_user(nome: str, email: str, password: str,
                 cpf: str | None = None, telefone: str | None = None) -> dict | None:
     """
-    Create a new user with a 24h trial plan. Returns the user dict.
+    Create a new user with a 3-day trial plan (2 CNPJs). Returns the user dict.
 
     CPF and telefone are personal data (LGPD-sensitive): they are stored
     ENCRYPTED at rest (Fernet, app/services/crypto_service.py). CPF is also
@@ -88,7 +88,7 @@ def create_user(nome: str, email: str, password: str,
     """
     user_id       = str(uuid.uuid4())
     now           = datetime.now(timezone.utc)
-    trial_expires = now + timedelta(hours=24)
+    trial_expires = now + timedelta(days=3)
     pw_hash       = hash_password(password)
 
     cpf_norm  = normalize_cpf(cpf)
@@ -103,7 +103,7 @@ def create_user(nome: str, email: str, password: str,
             (id, nome, email, password_hash, plano, cnpj_limite,
              status, trial_expires_at, created_at,
              cpf_hash, cpf_encrypted, telefone_encrypted)
-        VALUES (%s, %s, %s, %s, 'trial', 1, 'ativo', %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, 'trial', 2, 'ativo', %s, %s, %s, %s, %s)
         """,
         (user_id, nome, email.lower(), pw_hash, trial_expires, now,
          cpf_hash, cpf_enc, tel_enc),

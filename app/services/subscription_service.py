@@ -1,9 +1,9 @@
 """
 Subscription / plan enforcement logic.
 
-Trial rules:
-  - 3 days from registration
-  - 2 CNPJ slots (counted by distinct CNPJs actually downloaded)
+Free plan rules (plano='trial' kept as the internal id):
+  - Free forever, NO time expiry
+  - 5 CNPJ slots total / lifetime (counted by distinct CNPJs ever downloaded)
   - First CNPJ also recorded in trial_locked_cnpj (back-compat with the
     client-edit lock and the UI "locked" badge)
 
@@ -18,11 +18,11 @@ from datetime import datetime, timezone
 from app.services.db import execute
 
 
-# Number of distinct CNPJs allowed during the free trial.
-TRIAL_CNPJ_LIMIT = 2
+# Number of distinct CNPJs allowed on the free plan (lifetime, no time limit).
+FREE_CNPJ_LIMIT = 5
 
 PLANO_LIMITES: dict[str, int] = {
-    "trial":   TRIAL_CNPJ_LIMIT,
+    "trial":   FREE_CNPJ_LIMIT,
     "starter": 15,
     "pro":     50,
     "office":  150,
@@ -89,36 +89,25 @@ def verificar_e_registrar_download(user_id: str, cnpj: str) -> tuple[bool, str]:
                 )
 
     if plano == "trial":
-        # ── Trial expiry check ─────────────────────────────────────────────
-        trial_expires = user["trial_expires_at"]
-        if trial_expires:
-            if trial_expires.tzinfo is None:
-                trial_expires = trial_expires.replace(tzinfo=timezone.utc)
-            if now > trial_expires:
-                return (
-                    False,
-                    "Seu período de teste de 3 dias expirou. Assine um plano para continuar.",
-                )
-
-        # ── Trial CNPJ limit (up to TRIAL_CNPJ_LIMIT distinct CNPJs) ────────
-        # Count distinct CNPJs already used by this user across all months
-        # (a trial only lasts 3 days, so an all-time count is the lifetime set).
+        # ── Free plan: forever, no time expiry ─────────────────────────────
+        # Limited to FREE_CNPJ_LIMIT distinct CNPJs total (lifetime).
+        # Count distinct CNPJs ever used by this user (all months).
         cnpjs_usados = execute(
             "SELECT DISTINCT cnpj FROM monthly_usage WHERE user_id = %s",
             (user_id,),
             fetch="all",
         )
         cnpjs_set = {r["cnpj"] for r in (cnpjs_usados or [])}
-        # Back-compat: a legacy trial may have a locked CNPJ recorded before
+        # Back-compat: a legacy account may have a locked CNPJ recorded before
         # its first monthly_usage row existed.
         locked_cnpj = user.get("trial_locked_cnpj")
         if locked_cnpj:
             cnpjs_set.add(locked_cnpj)
 
-        if cnpj not in cnpjs_set and len(cnpjs_set) >= TRIAL_CNPJ_LIMIT:
+        if cnpj not in cnpjs_set and len(cnpjs_set) >= FREE_CNPJ_LIMIT:
             return (
                 False,
-                f"No período de teste você pode usar até {TRIAL_CNPJ_LIMIT} CNPJs. "
+                f"Você já usou seus {FREE_CNPJ_LIMIT} CNPJs gratuitos. "
                 f"Assine um plano para adicionar mais CNPJs.",
             )
 

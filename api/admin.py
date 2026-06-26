@@ -15,9 +15,9 @@
 
 All routes require a JWT for a user with is_admin = TRUE.
 """
-import sys, os, re
+import sys, os, re, io, csv
 from datetime import datetime, timezone, timedelta
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -25,6 +25,7 @@ if ROOT not in sys.path:
 
 from app.services.auth_service import verify_token
 from app.services.db import execute
+from app.services.crypto_service import decrypt
 from app.services import meta_capi_service as meta_capi
 
 app = Flask(__name__)
@@ -45,7 +46,7 @@ def _cors(resp):
 
 # Plan catalog — keep in sync with api/subscribe.py and subscription_service.PLANO_LIMITES
 _PLANOS = {
-    "trial":   {"valor": 0.0,   "limite": 2},
+    "trial":   {"valor": 0.0,   "limite": 5},
     "starter": {"valor": 67.0,  "limite": 15},
     "pro":     {"valor": 147.0, "limite": 50},
     "office":  {"valor": 297.0, "limite": 150},
@@ -148,12 +149,17 @@ def stats():
         )
         converted_count = converted_row["n"] if converted_row else 0
 
+        # Free plan has no time expiry — "eligible" = paid + free users who
+        # actually activated (made at least one successful download).
         eligible_row = execute(
             """
-            SELECT COUNT(*) AS n FROM users
-             WHERE is_admin = FALSE
-               AND (plano_origem IN ('asaas', 'stripe')
-                    OR (plano = 'trial' AND (trial_expires_at < NOW() OR trial_expires_at IS NULL)))
+            SELECT COUNT(*) AS n FROM users u
+             WHERE u.is_admin = FALSE
+               AND (u.plano_origem IN ('asaas', 'stripe')
+                    OR (u.plano = 'trial' AND EXISTS (
+                          SELECT 1 FROM download_logs d
+                           WHERE d.user_id = u.id AND d.sucesso = TRUE
+                    )))
             """,
             fetch="one"
         )
@@ -534,21 +540,127 @@ def delete_subscription(user_id):
             """
             UPDATE users
                SET plano             = 'trial',
-                   cnpj_limite       = 1,
+                   cnpj_limite       = 5,
                    status            = 'cancelado',
                    status_anterior   = NULL,
                    vitalicio         = FALSE,
                    acesso_expires_at = NULL,
                    plano_origem      = 'trial',
-                   trial_expires_at  = %s,
+                   trial_expires_at  = NULL,
                    cancelled_at      = %s
              WHERE id = %s
             """,
-            (now - timedelta(seconds=1), now, user_id),
+            (now, user_id),
         )
         return jsonify({"ok": True, "msg": "Assinatura removida. Conta voltou ao estado padrão (cancelada/sem plano ativo)."})
     except Exception as exc:
         return jsonify({"error": f"Erro ao excluir assinatura: {exc}"}), 500
+
+
+# ── POST /api/admin/users/<id>/reativar-gratis ────────────────────────────────
+# Reativa manualmente a conta no plano gratuito e LIBERA os 5 CNPJs de novo
+# (zera a contagem de uso). Útil para destravar quem já usou os 5 CNPJs grátis
+# ou restaurar um lead dormente para um novo teste.
+
+@app.route("/api/admin/users/<user_id>/reativar-gratis", methods=["POST"])
+def reativar_gratis(user_id):
+    if not _require_admin():
+        return jsonify({"error": "Acesso restrito ao administrador."}), 403
+
+    try:
+        user = execute("SELECT id, is_admin FROM users WHERE id = %s", (user_id,), fetch="one")
+        if not user:
+            return jsonify({"error": "Usuário não encontrado."}), 404
+        if user["is_admin"]:
+            return jsonify({"error": "Não é possível alterar uma conta de administrador."}), 400
+
+        execute(
+            """
+            UPDATE users
+               SET plano             = 'trial',
+                   cnpj_limite       = 5,
+                   status            = 'ativo',
+                   status_anterior   = NULL,
+                   vitalicio         = FALSE,
+                   acesso_expires_at = NULL,
+                   plano_origem      = 'trial',
+                   trial_locked_cnpj = NULL,
+                   trial_expires_at  = NULL,
+                   cancelled_at      = NULL
+             WHERE id = %s
+            """,
+            (user_id,),
+        )
+        # Zera a contagem de CNPJs usados (libera os 5 gratuitos novamente).
+        execute("DELETE FROM monthly_usage WHERE user_id = %s", (user_id,))
+
+        return jsonify({"ok": True, "msg": "Conta reativada no plano gratuito — 5 CNPJs liberados novamente."})
+    except Exception as exc:
+        return jsonify({"error": f"Erro ao reativar conta: {exc}"}), 500
+
+
+# ── GET /api/admin/export ─────────────────────────────────────────────────────
+# Exporta a lista de cadastros em CSV (nome, e-mail, telefone, etc.).
+# ⚠️ Contém PII (telefone/CPF) — restrito a admin.
+
+@app.route("/api/admin/export", methods=["GET"])
+def export_cadastros():
+    if not _require_admin():
+        return jsonify({"error": "Acesso restrito ao administrador."}), 403
+
+    try:
+        mes_atual = datetime.now(timezone.utc).strftime("%Y-%m")
+        rows = execute(
+            """
+            SELECT id, nome, email, telefone_encrypted, cpf_encrypted,
+                   plano, status, plano_origem, cnpj_limite, created_at,
+                   (SELECT COUNT(*) FROM clients c
+                     WHERE c.user_id = users.id)                       AS clientes,
+                   COALESCE((SELECT SUM(download_count) FROM monthly_usage m
+                              WHERE m.user_id = users.id), 0)          AS downloads_total,
+                   COALESCE((SELECT SUM(download_count) FROM monthly_usage m
+                              WHERE m.user_id = users.id
+                                AND m.mes = %s), 0)                    AS downloads_mes
+              FROM users
+             ORDER BY created_at DESC
+            """,
+            (mes_atual,),
+            fetch="all",
+        )
+
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "nome", "email", "telefone", "cpf", "plano", "status",
+            "plano_origem", "cnpj_limite", "criado_em",
+            "clientes", "downloads_total", "downloads_mes",
+        ])
+        for r in (rows or []):
+            writer.writerow([
+                r["nome"],
+                r["email"],
+                decrypt(r["telefone_encrypted"]) or "",
+                decrypt(r["cpf_encrypted"]) or "",
+                r["plano"],
+                r["status"],
+                r["plano_origem"],
+                r["cnpj_limite"],
+                r["created_at"].strftime("%Y-%m-%d %H:%M") if r["created_at"] else "",
+                int(r["clientes"] or 0),
+                int(r["downloads_total"] or 0),
+                int(r["downloads_mes"] or 0),
+            ])
+
+        # BOM (﻿) para o Excel reconhecer UTF-8 (acentos) corretamente.
+        data = "﻿" + buf.getvalue()
+        fname = f"cadastros_geradorxml_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"
+        return Response(
+            data,
+            mimetype="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Erro ao exportar cadastros: {exc}"}), 500
 
 
 # ── Integrations: Meta Conversions API ────────────────────────────────────────

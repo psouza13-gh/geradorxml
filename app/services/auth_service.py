@@ -78,7 +78,7 @@ def cpf_already_registered(cpf: str) -> bool:
 def create_user(nome: str, email: str, password: str,
                 cpf: str | None = None, telefone: str | None = None) -> dict | None:
     """
-    Create a new user with a 3-day trial plan (2 CNPJs). Returns the user dict.
+    Create a new user on the free plan (5 CNPJs, no time limit). Returns the user dict.
 
     CPF and telefone are personal data (LGPD-sensitive): they are stored
     ENCRYPTED at rest (Fernet, app/services/crypto_service.py). CPF is also
@@ -86,10 +86,9 @@ def create_user(nome: str, email: str, password: str,
     (anti mass-account-creation) without ever comparing/storing plaintext
     in a searchable column.
     """
-    user_id       = str(uuid.uuid4())
-    now           = datetime.now(timezone.utc)
-    trial_expires = now + timedelta(days=3)
-    pw_hash       = hash_password(password)
+    user_id   = str(uuid.uuid4())
+    now       = datetime.now(timezone.utc)
+    pw_hash   = hash_password(password)
 
     cpf_norm  = normalize_cpf(cpf)
     tel_norm  = normalize_telefone(telefone)
@@ -97,15 +96,16 @@ def create_user(nome: str, email: str, password: str,
     cpf_enc   = encrypt(cpf_norm) if cpf_norm else None
     tel_enc   = encrypt(tel_norm) if tel_norm else None
 
+    # Free plan: no time expiry (trial_expires_at stays NULL), 5 CNPJs lifetime.
     execute(
         """
         INSERT INTO users
             (id, nome, email, password_hash, plano, cnpj_limite,
              status, trial_expires_at, created_at,
              cpf_hash, cpf_encrypted, telefone_encrypted)
-        VALUES (%s, %s, %s, %s, 'trial', 2, 'ativo', %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, 'trial', 5, 'ativo', NULL, %s, %s, %s, %s)
         """,
-        (user_id, nome, email.lower(), pw_hash, trial_expires, now,
+        (user_id, nome, email.lower(), pw_hash, now,
          cpf_hash, cpf_enc, tel_enc),
     )
     return get_user_by_id(user_id)

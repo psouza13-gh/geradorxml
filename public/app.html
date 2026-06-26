@@ -515,23 +515,9 @@ function renderUserBar(user) {
     uso.textContent = limite === -1 ? `${cnpjsUsados} CNPJs este mês` : `${cnpjsUsados}/${limite} CNPJs este mês`;
   }
 
-  // Trial banner
+  // Free plan banner (no time limit — 5 CNPJs lifetime, enforced server-side)
   if(plano === 'trial') {
-    const exp = user.trial_expires_at ? new Date(user.trial_expires_at) : null;
-    const now = new Date();
-    if(exp && exp > now) {
-      const mins = Math.round((exp-now)/60000);
-      const hrs  = Math.floor(mins/60);
-      const rem  = mins % 60;
-      const days = Math.floor(hrs/24);
-      const remHrs = hrs % 24;
-      const timeStr = days > 0
-        ? `${days}d${remHrs > 0 ? remHrs+'h' : ''}`
-        : (hrs > 0 ? `${hrs}h${rem > 0 ? rem+'min' : ''}` : `${mins} min`);
-      msg.textContent = `Trial ativo — ${timeStr} restantes · 2 CNPJs.`;
-    } else {
-      msg.textContent = `Seu trial expirou. Assine um plano para continuar baixando NFS-e.`;
-    }
+    msg.textContent = `Plano Gratuito — 5 CNPJs grátis, para sempre. Faça o download no computador do escritório, com o certificado A1.`;
     banner.classList.remove('hidden');
     banner.classList.add('flex');
   }

@@ -14,9 +14,18 @@ from app.services.db import execute
 from app.services.crypto_service import encrypt, decrypt, deterministic_hash
 from app.services.validators import normalize_cpf, normalize_telefone
 
-JWT_SECRET      = os.environ.get("JWT_SECRET", "change-me-before-production")
+# Fail closed: never fall back to a public/known default. The source is public,
+# so a hardcoded fallback would let anyone forge admin tokens. If JWT_SECRET is
+# missing (or still the old insecure default), token creation/verification is
+# refused instead of silently accepting a guessable secret.
+_JWT_INSECURE_DEFAULT = "change-me-before-production"
+JWT_SECRET      = os.environ.get("JWT_SECRET", "")
 JWT_ALGO        = "HS256"
 JWT_EXPIRY_HOURS = 72
+
+
+def _secret_ok() -> bool:
+    return bool(JWT_SECRET) and JWT_SECRET != _JWT_INSECURE_DEFAULT
 
 
 # ── Password ──────────────────────────────────────────────────────────────────
@@ -35,6 +44,8 @@ def check_password(password: str, hashed: str) -> bool:
 # ── JWT ───────────────────────────────────────────────────────────────────────
 
 def create_token(user_id: str, email: str) -> str:
+    if not _secret_ok():
+        raise RuntimeError("JWT_SECRET não configurado no servidor.")
     now = datetime.now(timezone.utc)
     payload = {
         "sub": user_id,
@@ -47,6 +58,8 @@ def create_token(user_id: str, email: str) -> str:
 
 def verify_token(token: str) -> dict | None:
     """Decode and verify a JWT. Returns the payload dict or None on failure."""
+    if not _secret_ok():
+        return None
     try:
         return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
     except jwt.ExpiredSignatureError:

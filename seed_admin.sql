@@ -1,7 +1,8 @@
 -- ═══════════════════════════════════════════════════════════
 --  Seed: admin user (BPO plan — unlimited access)
---  Run once against your Neon database:
---    psql $DATABASE_URL -f seed_admin.sql
+--  O hash bcrypt NÃO fica versionado. Gere e passe na hora:
+--    python -c "import bcrypt;print(bcrypt.hashpw(b'SUA_SENHA',bcrypt.gensalt()).decode())"
+--    psql "$DATABASE_URL" -v admin_pw_hash="'<HASH_GERADO>'" -f seed_admin.sql
 -- ═══════════════════════════════════════════════════════════
 
 INSERT INTO users (
@@ -20,7 +21,7 @@ VALUES (
     'da438d3b-19cb-4664-8f8c-d04bb7464b04',
     'Admin',
     'juliasouza2203@gmail.com',
-    '$2b$12$MOZIZ.U7XSE5km2AghcKJOszklz3OW76Fs2EN8h..c1TQDLYP02o.',
+    :admin_pw_hash,
     'bpo',
     -1,
     'ativo',

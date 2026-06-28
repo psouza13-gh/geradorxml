@@ -608,11 +608,19 @@ def export_cadastros():
     if not _require_admin():
         return jsonify({"error": "Acesso restrito ao administrador."}), 403
 
+    # Protege contra CSV/formula injection: célula que começa com = + - @ (ou
+    # tab/CR) pode virar fórmula no Excel. Prefixamos com aspa simples.
+    def _safe(value) -> str:
+        s = "" if value is None else str(value)
+        if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
+            return "'" + s
+        return s
+
     try:
         mes_atual = datetime.now(timezone.utc).strftime("%Y-%m")
         rows = execute(
             """
-            SELECT id, nome, email, telefone_encrypted, cpf_encrypted,
+            SELECT id, nome, email, telefone_encrypted,
                    plano, status, plano_origem, cnpj_limite, created_at,
                    (SELECT COUNT(*) FROM clients c
                      WHERE c.user_id = users.id)                       AS clientes,
@@ -630,17 +638,17 @@ def export_cadastros():
 
         buf = io.StringIO()
         writer = csv.writer(buf)
+        # CPF não é exportado — irrelevante para o negócio e reduz exposição de PII.
         writer.writerow([
-            "nome", "email", "telefone", "cpf", "plano", "status",
+            "nome", "email", "telefone", "plano", "status",
             "plano_origem", "cnpj_limite", "criado_em",
             "clientes", "downloads_total", "downloads_mes",
         ])
         for r in (rows or []):
             writer.writerow([
-                r["nome"],
-                r["email"],
-                decrypt(r["telefone_encrypted"]) or "",
-                decrypt(r["cpf_encrypted"]) or "",
+                _safe(r["nome"]),
+                _safe(r["email"]),
+                _safe(decrypt(r["telefone_encrypted"]) or ""),
                 r["plano"],
                 r["status"],
                 r["plano_origem"],

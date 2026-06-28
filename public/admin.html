@@ -567,6 +567,16 @@ async function _loadUsers() {
   } catch (e) {}
 }
 
+// Escapa HTML para evitar XSS armazenado ao injetar dados do usuário via innerHTML.
+function esc(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function _renderUsers(data) {
   _uCache = {};
   const rows = data.users || [];
@@ -587,8 +597,8 @@ function _renderUsers(data) {
 
     return `<tr class="row border-b border-gray-800/60">
       <td class="py-2.5 pr-3">
-        <div class="text-gray-200 font-medium flex items-center gap-1.5">${u.nome || '—'} ${u.is_admin ? '<span class="badge bg-amber-500/15 text-amber-300 border border-amber-500/30">admin</span>' : ''}</div>
-        <div class="text-gray-500">${u.email}</div>
+        <div class="text-gray-200 font-medium flex items-center gap-1.5">${esc(u.nome) || '—'} ${u.is_admin ? '<span class="badge bg-amber-500/15 text-amber-300 border border-amber-500/30">admin</span>' : ''}</div>
+        <div class="text-gray-500">${esc(u.email)}</div>
       </td>
       <td class="py-2.5 pr-3">${planoBadge}</td>
       <td class="py-2.5 pr-3 text-gray-400">${limite}</td>

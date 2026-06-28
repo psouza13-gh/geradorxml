@@ -2,10 +2,12 @@
 --  Seed: SUPER ADMIN account (owner — full access + admin panel)
 --
 --  email: p.esouzaf@gmail.com
---  senha: (definida no momento da criação — hash bcrypt abaixo)
+--  senha: o hash bcrypt NÃO fica versionado. Gere e passe na hora.
 --
---  Run once against your Neon database (after migration_admin_panel.sql):
---    psql $DATABASE_URL -f seed_super_admin.sql
+--  1) Gere o hash localmente (NUNCA commitar):
+--       python -c "import bcrypt;print(bcrypt.hashpw(b'SUA_SENHA',bcrypt.gensalt()).decode())"
+--  2) Rode passando o hash como variável psql:
+--       psql "$DATABASE_URL" -v admin_pw_hash="'<HASH_GERADO>'" -f seed_super_admin.sql
 -- ═══════════════════════════════════════════════════════════════
 
 INSERT INTO users (
@@ -28,7 +30,7 @@ VALUES (
     gen_random_uuid(),
     'Pedro Souza',
     'p.esouzaf@gmail.com',
-    '$2b$12$vAAKVLracLlTQfc1SalMVepNEAvRAni74KjcBNkwpnyDp5hVCbBge',
+    :admin_pw_hash,
     'bpo',
     -1,
     'ativo',

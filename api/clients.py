@@ -22,6 +22,7 @@ from app.services.subscription_service import (
 from app.services.db import execute
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 256 * 1024  # 256 KB — anti-DoS / payload abusivo
 
 _CORS = {
     "Access-Control-Allow-Origin":  "*",
@@ -107,6 +108,8 @@ def clients():
 
     if not nome:
         return jsonify({"error": "Nome é obrigatório."}), 400
+    if len(nome) > 120 or len(municipio_nome) > 120 or len(municipio_codigo) > 20:
+        return jsonify({"error": "Dados muito longos."}), 400
     if not cnpj or len(cnpj) != 14:
         return jsonify({"error": "CNPJ inválido (14 dígitos sem máscara)."}), 400
 
@@ -193,6 +196,8 @@ def client_detail(client_id: str):
 
         if not nome:
             return jsonify({"error": "Nome é obrigatório."}), 400
+        if len(nome) > 120 or len(municipio_nome) > 120 or len(municipio_codigo) > 20:
+            return jsonify({"error": "Dados muito longos."}), 400
         if not cnpj or len(cnpj) != 14:
             return jsonify({"error": "CNPJ inválido."}), 400
 

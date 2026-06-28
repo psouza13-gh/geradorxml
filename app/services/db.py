@@ -3,6 +3,8 @@ Neon Postgres connection helper.
 Creates a fresh connection per call — no persistent pool (serverless-safe).
 """
 import os
+from contextlib import contextmanager
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -39,6 +41,33 @@ def execute(sql: str, params=None, fetch: str | None = None):
         if fetch == "all":
             return cur.fetchall()
         return None
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+@contextmanager
+def transaction():
+    """
+    Run several statements in ONE atomic transaction on a single connection.
+
+    Usage:
+        with transaction() as cur:
+            cur.execute(...)
+            rows = cur.fetchall()
+            cur.execute(...)
+        # committed on clean exit; rolled back on exception
+
+    Use this (with pg_advisory_xact_lock) for read-then-write logic that must
+    not race under concurrency (e.g. enforcing usage limits).
+    """
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        yield cur
+        conn.commit()
     except Exception:
         conn.rollback()
         raise

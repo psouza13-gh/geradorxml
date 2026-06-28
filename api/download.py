@@ -22,6 +22,8 @@ from app.services.subscription_service import verificar_e_registrar_download
 from app.services.db import execute
 
 app = Flask(__name__)
+# Limite do corpo total da requisição (certificado ~1 MB + campos do formulário).
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024  # 2 MB
 
 MAX_CERT_BYTES = 1 * 1024 * 1024  # 1 MB
 

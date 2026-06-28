@@ -25,8 +25,17 @@ from app.services.meta_capi_service import (
     track_trial_start as send_trial_start,
 )
 from app.services.subscription_service import get_uso_mensal
+from app.services.rate_limit import limited
 
 app = Flask(__name__)
+
+# Limita o tamanho do corpo das requisições JSON (anti-DoS / poluição de banco).
+app.config["MAX_CONTENT_LENGTH"] = 256 * 1024  # 256 KB
+
+
+def _client_ip() -> str:
+    return (request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or request.remote_addr or "unknown")
 
 _CORS = {
     "Access-Control-Allow-Origin":  "*",
@@ -80,6 +89,9 @@ def preflight(_=None):
 
 @app.route("/api/auth/register", methods=["POST"])
 def register():
+    if limited(f"register:{_client_ip()}", limit=6, window=600):
+        return jsonify({"error": "Muitas contas criadas a partir deste acesso. Tente novamente mais tarde."}), 429
+
     data     = request.get_json(silent=True) or {}
     nome     = (data.get("nome")     or "").strip()
     email    = (data.get("email")    or "").strip().lower()
@@ -89,6 +101,9 @@ def register():
 
     if not nome:
         return jsonify({"error": "Nome é obrigatório."}), 400
+    # Tetos de tamanho (anti-poluição de banco / payload abusivo).
+    if len(nome) > 120 or len(email) > 254 or len(senha) > 200 or len(cpf) > 20 or len(telefone) > 20:
+        return jsonify({"error": "Dados muito longos."}), 400
     if not email or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
         return jsonify({"error": "E-mail inválido."}), 400
     if len(senha) < 6:
@@ -139,6 +154,9 @@ def register():
 
 @app.route("/api/auth/login", methods=["POST"])
 def login():
+    if limited(f"login:{_client_ip()}", limit=12, window=300):
+        return jsonify({"error": "Muitas tentativas de login. Aguarde alguns minutos e tente novamente."}), 429
+
     data  = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip().lower()
     senha = data.get("senha") or ""
@@ -170,6 +188,9 @@ def forgot_password():
 
     generic = jsonify({"message": "Se este e-mail estiver cadastrado, enviaremos um código de redefinição em instantes."})
 
+    if limited(f"forgot:{_client_ip()}", limit=6, window=900):
+        return jsonify({"error": "Muitas solicitações. Aguarde alguns minutos e tente novamente."}), 429
+
     if not email or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
         return generic
 
@@ -189,6 +210,9 @@ def forgot_password():
 
 @app.route("/api/auth/reset-password", methods=["POST"])
 def reset_password():
+    if limited(f"reset:{_client_ip()}", limit=10, window=600):
+        return jsonify({"error": "Muitas tentativas. Aguarde alguns minutos e tente novamente."}), 429
+
     data  = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip().lower()
     code  = (data.get("code")  or "").strip()

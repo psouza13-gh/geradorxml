@@ -15,7 +15,7 @@ Paid plan limits (CNPJs per month):
 """
 from datetime import datetime, timezone
 
-from app.services.db import execute
+from app.services.db import execute, transaction
 
 
 # Number of distinct CNPJs allowed on the free plan (lifetime, no time limit).
@@ -88,67 +88,63 @@ def verificar_e_registrar_download(user_id: str, cnpj: str) -> tuple[bool, str]:
                     "Entre em contato com o suporte para renovar.",
                 )
 
-    if plano == "trial":
-        # ── Free plan: forever, no time expiry ─────────────────────────────
-        # Limited to FREE_CNPJ_LIMIT distinct CNPJs total (lifetime).
-        # Count distinct CNPJs ever used by this user (all months).
-        cnpjs_usados = execute(
-            "SELECT DISTINCT cnpj FROM monthly_usage WHERE user_id = %s",
-            (user_id,),
-            fetch="all",
-        )
-        cnpjs_set = {r["cnpj"] for r in (cnpjs_usados or [])}
-        # Back-compat: a legacy account may have a locked CNPJ recorded before
-        # its first monthly_usage row existed.
-        locked_cnpj = user.get("trial_locked_cnpj")
-        if locked_cnpj:
-            cnpjs_set.add(locked_cnpj)
+    mes         = now.strftime("%Y-%m")
+    locked_cnpj = user.get("trial_locked_cnpj")
 
-        if cnpj not in cnpjs_set and len(cnpjs_set) >= FREE_CNPJ_LIMIT:
-            return (
-                False,
-                f"Você já usou seus {FREE_CNPJ_LIMIT} CNPJs gratuitos. "
-                f"Assine um plano para adicionar mais CNPJs.",
-            )
+    # ── Atomic limit check + registration (serialized per user) ────────────
+    # pg_advisory_xact_lock serializes concurrent downloads for the SAME user,
+    # eliminating the TOCTOU race where parallel requests each read "under the
+    # limit" before any of them records its usage. The lock is held only for
+    # this short count+insert — the heavy NFS-e download runs afterwards,
+    # outside the transaction.
+    with transaction() as cur:
+        cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (str(user_id),))
 
-        # Keep trial_locked_cnpj pointing to the FIRST CNPJ used (back-compat
-        # with the client edit/delete lock and the "locked" badge in the UI).
-        if not locked_cnpj:
-            execute(
-                "UPDATE users SET trial_locked_cnpj = %s WHERE id = %s",
-                (cnpj, user_id),
-            )
+        if plano == "trial":
+            # Free plan: forever, no time expiry; FREE_CNPJ_LIMIT distinct CNPJs (lifetime).
+            cur.execute("SELECT DISTINCT cnpj FROM monthly_usage WHERE user_id = %s", (user_id,))
+            cnpjs_set = {r["cnpj"] for r in cur.fetchall()}
+            if locked_cnpj:
+                cnpjs_set.add(locked_cnpj)
 
-    else:
-        # ── Paid plan: monthly CNPJ count ──────────────────────────────────
-        limite = get_cnpj_limite(plano)
-        if limite != -1:
-            mes = now.strftime("%Y-%m")
-            cnpjs_usados = execute(
-                "SELECT DISTINCT cnpj FROM monthly_usage WHERE user_id = %s AND mes = %s",
-                (user_id, mes),
-                fetch="all",
-            )
-            cnpjs_set = {r["cnpj"] for r in (cnpjs_usados or [])}
-
-            if cnpj not in cnpjs_set and len(cnpjs_set) >= limite:
+            if cnpj not in cnpjs_set and len(cnpjs_set) >= FREE_CNPJ_LIMIT:
                 return (
                     False,
-                    f"Limite de {limite} CNPJs/mês atingido no plano "
-                    f"{plano.capitalize()}. Faça upgrade para continuar.",
+                    f"Você já usou seus {FREE_CNPJ_LIMIT} CNPJs gratuitos. "
+                    f"Assine um plano para adicionar mais CNPJs.",
                 )
 
-    # ── Register this download ─────────────────────────────────────────────
-    mes = now.strftime("%Y-%m")
-    execute(
-        """
-        INSERT INTO monthly_usage (user_id, cnpj, mes, download_count, first_download_at)
-        VALUES (%s, %s, %s, 1, %s)
-        ON CONFLICT (user_id, cnpj, mes)
-        DO UPDATE SET download_count = monthly_usage.download_count + 1
-        """,
-        (user_id, cnpj, mes, now),
-    )
+            # Keep trial_locked_cnpj on the FIRST CNPJ (back-compat with the
+            # client edit/delete lock and the "locked" badge in the UI).
+            if not locked_cnpj:
+                cur.execute("UPDATE users SET trial_locked_cnpj = %s WHERE id = %s", (cnpj, user_id))
+
+        else:
+            # Paid plan: monthly distinct-CNPJ count.
+            limite = get_cnpj_limite(plano)
+            if limite != -1:
+                cur.execute(
+                    "SELECT DISTINCT cnpj FROM monthly_usage WHERE user_id = %s AND mes = %s",
+                    (user_id, mes),
+                )
+                cnpjs_set = {r["cnpj"] for r in cur.fetchall()}
+                if cnpj not in cnpjs_set and len(cnpjs_set) >= limite:
+                    return (
+                        False,
+                        f"Limite de {limite} CNPJs/mês atingido no plano "
+                        f"{plano.capitalize()}. Faça upgrade para continuar.",
+                    )
+
+        # Register this download (same transaction → atomic with the check).
+        cur.execute(
+            """
+            INSERT INTO monthly_usage (user_id, cnpj, mes, download_count, first_download_at)
+            VALUES (%s, %s, %s, 1, %s)
+            ON CONFLICT (user_id, cnpj, mes)
+            DO UPDATE SET download_count = monthly_usage.download_count + 1
+            """,
+            (user_id, cnpj, mes, now),
+        )
 
     return True, ""
 

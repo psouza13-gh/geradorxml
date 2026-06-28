@@ -29,6 +29,7 @@ from app.services.crypto_service import decrypt
 from app.services import meta_capi_service as meta_capi
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 256 * 1024  # 256 KB — anti-DoS / payload abusivo
 
 _CORS = {
     "Access-Control-Allow-Origin":  "*",

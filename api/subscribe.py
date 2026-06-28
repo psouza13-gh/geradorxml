@@ -26,6 +26,7 @@ from app.services import stripe_service
 from app.services.stripe_service import StripeError
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 256 * 1024  # 256 KB — anti-DoS / payload abusivo
 
 _CORS = {
     "Access-Control-Allow-Origin":  "*",

@@ -272,29 +272,6 @@
           <label class="label">CNPJ <span class="text-red-400">*</span></label>
           <input id="c-cnpj" type="text" placeholder="00.000.000/0001-00" class="input"/>
         </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="label">Inscrição Municipal</label>
-            <input id="c-im" type="text" class="input"/>
-          </div>
-          <div>
-            <label class="label">Cód. IBGE Município</label>
-            <input id="c-mun" type="text" placeholder="3550308" class="input"/>
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="label">Ambiente padrão</label>
-            <select id="c-amb" class="input">
-              <option value="producao">Produção</option>
-              <option value="homologacao">Homologação</option>
-            </select>
-          </div>
-          <div>
-            <label class="label">NSU padrão</label>
-            <input id="c-nsu" type="number" value="0" min="0" class="input"/>
-          </div>
-        </div>
         <p class="text-xs text-gray-500">
           Certificado e senha NÃO são salvos — você os informa na hora do download.
         </p>
@@ -590,10 +567,6 @@ function newClientForm() {
   $('client-id').value = '';
   $('c-nome').value    = '';
   $('c-cnpj').value    = '';
-  $('c-im').value      = '';
-  $('c-mun').value     = '';
-  $('c-amb').value     = 'producao';
-  $('c-nsu').value     = '0';
   $('form-title').textContent = 'Novo Cliente';
   $('btn-delete').classList.add('hidden');
   document.querySelectorAll('.client-card').forEach(el=>el.classList.remove('selected'));
@@ -606,10 +579,6 @@ async function editClient(id) {
   $('client-id').value = c.id;
   $('c-nome').value    = c.nome || '';
   $('c-cnpj').value    = fmtCNPJ(c.cnpj||'');
-  $('c-im').value      = '';  // not stored in DB
-  $('c-mun').value     = c.municipio_codigo || '';
-  $('c-amb').value     = 'producao';
-  $('c-nsu').value     = '0';
   $('form-title').textContent = c.locked ? 'Ver Cliente (bloqueado)' : 'Editar Cliente';
   $('btn-delete').classList.toggle('hidden', !!c.locked);
   document.querySelectorAll('.client-card').forEach(el=>{
@@ -623,11 +592,9 @@ async function saveClientForm() {
   if(!nome||!cnpj) { alert('Preencha Nome e CNPJ.'); return; }
   if(cnpj.length !== 14) { alert('CNPJ inválido — informe os 14 dígitos.'); return; }
 
-  const existingId         = $('client-id').value;
-  const municipio_codigo   = $('c-mun').value.trim();
-  const municipio_nome_val = '';   // not collected in this form
+  const existingId = $('client-id').value;
 
-  const payload = { nome, cnpj, municipio_codigo, municipio_nome: municipio_nome_val };
+  const payload = { nome, cnpj, municipio_codigo: '', municipio_nome: '' };
 
   try {
     const url    = existingId ? `/api/clients/${existingId}` : '/api/clients';

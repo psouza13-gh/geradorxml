@@ -27,6 +27,11 @@ from app.services.auth_service import verify_token
 from app.services.db import execute
 from app.services.crypto_service import decrypt
 from app.services import meta_capi_service as meta_capi
+from app.services.email_service import (
+    send_engagement_welcome,
+    send_engagement_reminder,
+    send_engagement_winback,
+)
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 256 * 1024  # 256 KB — anti-DoS / payload abusivo
@@ -670,6 +675,73 @@ def export_cadastros():
         )
     except Exception as exc:
         return jsonify({"error": f"Erro ao exportar cadastros: {exc}"}), 500
+
+
+# ── POST /api/admin/reengajar ─────────────────────────────────────────────────
+# Envia um e-mail de reengajamento (welcome | reminder | winback) para uma
+# LISTA de usuários selecionados manualmente no painel. Registra em
+# engagement_messages para não duplicar. Máx. 100 por chamada (limite de envio).
+
+_REENG_FNS = {
+    "welcome":  send_engagement_welcome,
+    "reminder": send_engagement_reminder,
+    "winback":  send_engagement_winback,
+}
+
+
+@app.route("/api/admin/reengajar", methods=["POST"])
+def reengajar():
+    if not _require_admin():
+        return jsonify({"error": "Acesso restrito ao administrador."}), 403
+
+    data = request.get_json(silent=True) or {}
+    tipo = (data.get("tipo") or "").strip().lower()
+    ids  = data.get("user_ids") or []
+
+    if tipo not in _REENG_FNS:
+        return jsonify({"error": "Tipo de e-mail inválido."}), 400
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"error": "Selecione ao menos um usuário."}), 400
+    if len(ids) > 100:
+        return jsonify({"error": "Selecione no máximo 100 usuários por vez (limite de envio)."}), 400
+
+    # Garante a tabela de controle (mesmo padrão do cron).
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS engagement_messages (
+                id BIGSERIAL PRIMARY KEY,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                tipo TEXT NOT NULL,
+                sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (user_id, tipo)
+            )
+            """
+        )
+    except Exception:
+        pass
+
+    enviar = _REENG_FNS[tipo]
+    enviados, falhas = 0, 0
+    for uid in ids:
+        try:
+            row = execute("SELECT id, nome, email FROM users WHERE id = %s", (str(uid),), fetch="one")
+            if not row or not row.get("email"):
+                falhas += 1
+                continue
+            if enviar(row["email"], row["nome"]):
+                execute(
+                    "INSERT INTO engagement_messages (user_id, tipo) VALUES (%s, %s) "
+                    "ON CONFLICT (user_id, tipo) DO NOTHING",
+                    (row["id"], tipo),
+                )
+                enviados += 1
+            else:
+                falhas += 1
+        except Exception:
+            falhas += 1
+
+    return jsonify({"ok": True, "enviados": enviados, "falhas": falhas})
 
 
 # ── Integrations: Meta Conversions API ────────────────────────────────────────

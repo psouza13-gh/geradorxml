@@ -96,10 +96,25 @@
       </div>
     </div>
 
+    <!-- Reengajamento por e-mail (seleção manual) -->
+    <div class="flex items-center gap-2 flex-wrap mb-2 p-2 rounded-lg bg-gray-800/40 border border-gray-800">
+      <span class="text-xs text-gray-300 font-medium">✉️ Reengajar por e-mail:</span>
+      <select id="reeng-tipo" class="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-emerald-500">
+        <option value="welcome">Boas-vindas (1º acesso)</option>
+        <option value="reminder" selected>Reforço (prova de valor)</option>
+        <option value="winback">Última chamada</option>
+      </select>
+      <button onclick="_reengajarSelecionados()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs px-3 py-1.5 rounded-lg transition">
+        Enviar aos selecionados (<span id="reeng-count">0</span>)
+      </button>
+      <span class="text-[11px] text-gray-500">Marque os usuários abaixo. Dica: filtre por plano “Grátis” e mire quem tem “Downloads (total)” = 0.</span>
+    </div>
+
     <div class="overflow-x-auto">
       <table class="w-full text-xs">
         <thead>
           <tr class="text-gray-500 text-left border-b border-gray-800">
+            <th class="py-2 pr-2 font-medium"><input type="checkbox" id="u-check-all" onclick="_toggleAllChecks(this)" title="Selecionar todos (desta página)"></th>
             <th class="py-2 pr-3 font-medium">Usuário</th>
             <th class="py-2 pr-3 font-medium">Plano</th>
             <th class="py-2 pr-3 font-medium">Limite CNPJ</th>
@@ -596,6 +611,7 @@ function _renderUsers(data) {
     }
 
     return `<tr class="row border-b border-gray-800/60">
+      <td class="py-2.5 pr-2"><input type="checkbox" class="u-check" value="${u.id}" onchange="_updateReengCount()"></td>
       <td class="py-2.5 pr-3">
         <div class="text-gray-200 font-medium flex items-center gap-1.5">${esc(u.nome) || '—'} ${u.is_admin ? '<span class="badge bg-amber-500/15 text-amber-300 border border-amber-500/30">admin</span>' : ''}</div>
         <div class="text-gray-500">${esc(u.email)}</div>
@@ -623,6 +639,43 @@ function _renderUsers(data) {
       <button ${p<=1?'disabled':''} onclick="_uPage=Math.max(1,_uPage-1);_loadUsers()" class="px-2.5 py-1 rounded border border-gray-700 ${p<=1?'opacity-40 cursor-not-allowed':'hover:bg-gray-800'}">‹ Anterior</button>
       <button ${p>=pages?'disabled':''} onclick="_uPage=Math.min(${pages},_uPage+1);_loadUsers()" class="px-2.5 py-1 rounded border border-gray-700 ${p>=pages?'opacity-40 cursor-not-allowed':'hover:bg-gray-800'}">Próxima ›</button>
     </div>`;
+
+  // Reset da seleção a cada render (nova página/filtro)
+  const all = $('u-check-all'); if (all) all.checked = false;
+  _updateReengCount();
+}
+
+// ── Reengajamento por e-mail (seleção manual) ───────────────────────────────
+function _toggleAllChecks(master) {
+  document.querySelectorAll('.u-check').forEach(c => c.checked = master.checked);
+  _updateReengCount();
+}
+function _updateReengCount() {
+  const n = document.querySelectorAll('.u-check:checked').length;
+  const el = $('reeng-count'); if (el) el.textContent = n;
+}
+async function _reengajarSelecionados() {
+  const ids = [...document.querySelectorAll('.u-check:checked')].map(c => c.value);
+  if (ids.length === 0) { alert('Selecione ao menos um usuário na tabela.'); return; }
+  if (ids.length > 100) { alert('Selecione no máximo 100 usuários por vez (limite de envio).'); return; }
+  const tipo = $('reeng-tipo').value;
+  const nomes = { welcome: 'Boas-vindas (1º acesso)', reminder: 'Reforço (prova de valor)', winback: 'Última chamada' };
+  if (!confirm(`Enviar o e-mail "${nomes[tipo]}" para ${ids.length} usuário(s) selecionado(s)?`)) return;
+  try {
+    const resp = await fetch('/api/admin/reengajar', {
+      method: 'POST',
+      headers: { ...authHdrs(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_ids: ids, tipo }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { alert(data.error || 'Erro ao enviar.'); return; }
+    alert(`✓ E-mails enviados: ${data.enviados}` + (data.falhas ? ` · Falhas: ${data.falhas}` : ''));
+    document.querySelectorAll('.u-check:checked').forEach(c => c.checked = false);
+    const all = $('u-check-all'); if (all) all.checked = false;
+    _updateReengCount();
+  } catch (e) {
+    alert('Erro de conexão. Tente novamente.');
+  }
 }
 
 // ── Manage modal ───────────────────────────────────────────────────────────

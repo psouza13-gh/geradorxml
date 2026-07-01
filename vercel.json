@@ -6,7 +6,7 @@
     "api/clients.py":        { "maxDuration": 30  },
     "api/webhook_stripe.py": { "maxDuration": 30  },
     "api/subscribe.py":      { "maxDuration": 30  },
-    "api/admin.py":          { "maxDuration": 30  },
+    "api/admin.py":          { "maxDuration": 60  },
     "api/public.py":         { "maxDuration": 10  },
     "api/cron_engagement.py":{ "maxDuration": 60  }
   },

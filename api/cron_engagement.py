@@ -82,10 +82,37 @@ def _cohort(tipo: str, dia_min: int, dia_max: int):
     )
 
 
+_FNS = {
+    "welcome":  send_engagement_welcome,
+    "reminder": send_engagement_reminder,
+    "winback":  send_engagement_winback,
+}
+
+
 @app.route("/api/cron/engagement", methods=["GET", "POST"])
 def engagement():
     if not _authorized():
         return jsonify({"error": "Unauthorized"}), 401
+
+    # ── Modo de teste: envia o(s) e-mail(s) na hora para um endereço, ────────
+    # ignorando a janela/cohort. Não grava em engagement_messages (é só teste).
+    #   ?test=all|welcome|reminder|winback&to=email[&nome=Pedro]
+    test = (request.args.get("test") or "").lower().strip()
+    if test:
+        to = (request.args.get("to") or "").strip()
+        if not to:
+            return jsonify({"error": "Informe ?to=email"}), 400
+        nome = request.args.get("nome") or "Pedro"
+        alvos = ["welcome", "reminder", "winback"] if test == "all" else [test]
+        if any(t not in _FNS for t in alvos):
+            return jsonify({"error": "test deve ser welcome | reminder | winback | all"}), 400
+        resultado = {}
+        for t in alvos:
+            try:
+                resultado[t] = "enviado" if _FNS[t](to, nome) else "falhou"
+            except Exception as exc:
+                resultado[t] = f"erro: {exc}"
+        return jsonify({"ok": True, "test": True, "to": to, "resultado": resultado})
 
     dry = (request.args.get("dry") or "").lower() in ("1", "true", "yes")
 

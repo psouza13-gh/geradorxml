@@ -744,6 +744,54 @@ def reengajar():
     return jsonify({"ok": True, "enviados": enviados, "falhas": falhas})
 
 
+# ── GET /api/admin/download-logs ──────────────────────────────────────────────
+# Diagnóstico da "Taxa de erro": lista as FALHAS de download dos últimos 30 dias
+# com usuário + CNPJ + mensagem de erro, e um resumo agrupado por tipo de erro.
+
+@app.route("/api/admin/download-logs", methods=["GET"])
+def download_logs_view():
+    if not _require_admin():
+        return jsonify({"error": "Acesso restrito ao administrador."}), 403
+    try:
+        tot = execute(
+            "SELECT COUNT(*) FILTER (WHERE sucesso) AS s, "
+            "       COUNT(*) FILTER (WHERE NOT sucesso) AS f "
+            "  FROM download_logs WHERE created_at >= NOW() - INTERVAL '30 days'",
+            fetch="one",
+        ) or {}
+        por_erro = execute(
+            "SELECT COALESCE(erro, '(sem descrição)') AS erro, COUNT(*) AS n "
+            "  FROM download_logs "
+            " WHERE sucesso = FALSE AND created_at >= NOW() - INTERVAL '30 days' "
+            " GROUP BY erro ORDER BY n DESC",
+            fetch="all",
+        )
+        falhas = execute(
+            """
+            SELECT d.created_at, d.cnpj, d.erro, u.email
+              FROM download_logs d
+              LEFT JOIN users u ON u.id = d.user_id
+             WHERE d.sucesso = FALSE AND d.created_at >= NOW() - INTERVAL '30 days'
+             ORDER BY d.created_at DESC
+             LIMIT 100
+            """,
+            fetch="all",
+        )
+
+        def _fmt(dt):
+            return dt.strftime("%d/%m %H:%M") if dt else ""
+
+        return jsonify({
+            "total_sucesso": int(tot.get("s") or 0),
+            "total_falhas":  int(tot.get("f") or 0),
+            "por_erro":      [{"erro": r["erro"], "n": r["n"]} for r in (por_erro or [])],
+            "falhas":        [{"quando": _fmt(r["created_at"]), "cnpj": r["cnpj"],
+                               "erro": r["erro"], "email": r["email"]} for r in (falhas or [])],
+        })
+    except Exception as exc:
+        return jsonify({"error": f"Erro ao carregar falhas: {exc}"}), 500
+
+
 # ── Integrations: Meta Conversions API ────────────────────────────────────────
 # GET   /api/admin/integrations/meta       — current config + token status
 # POST  /api/admin/integrations/meta       — update pixel id / toggles / test code

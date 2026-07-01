@@ -7,17 +7,22 @@
     "api/webhook_stripe.py": { "maxDuration": 30  },
     "api/subscribe.py":      { "maxDuration": 30  },
     "api/admin.py":          { "maxDuration": 30  },
-    "api/public.py":         { "maxDuration": 10  }
+    "api/public.py":         { "maxDuration": 10  },
+    "api/cron_engagement.py":{ "maxDuration": 60  }
   },
+  "crons": [
+    { "path": "/api/cron/engagement", "schedule": "0 13 * * *" }
+  ],
   "routes": [
-    { "src": "/api/auth(.*)",        "dest": "/api/auth.py"           },
-    { "src": "/api/health(.*)",      "dest": "/api/health.py"         },
-    { "src": "/api/clients(.*)",     "dest": "/api/clients.py"        },
-    { "src": "/api/webhook/stripe",  "dest": "/api/webhook_stripe.py" },
-    { "src": "/api/subscribe(.*)",   "dest": "/api/subscribe.py"      },
-    { "src": "/api/admin(.*)",       "dest": "/api/admin.py"          },
-    { "src": "/api/public(.*)",      "dest": "/api/public.py"         },
-    { "src": "/api/(.*)",            "dest": "/api/$1"                },
+    { "src": "/api/auth(.*)",         "dest": "/api/auth.py"            },
+    { "src": "/api/health(.*)",       "dest": "/api/health.py"          },
+    { "src": "/api/clients(.*)",      "dest": "/api/clients.py"         },
+    { "src": "/api/webhook/stripe",   "dest": "/api/webhook_stripe.py"  },
+    { "src": "/api/subscribe(.*)",    "dest": "/api/subscribe.py"       },
+    { "src": "/api/admin(.*)",        "dest": "/api/admin.py"           },
+    { "src": "/api/public(.*)",       "dest": "/api/public.py"          },
+    { "src": "/api/cron/engagement",  "dest": "/api/cron_engagement.py" },
+    { "src": "/api/(.*)",             "dest": "/api/$1"                 },
     { "src": "/app",                 "dest": "/app.html"              },
     { "src": "/admin/login",         "dest": "/admin-login.html"      },
     { "src": "/admin",               "dest": "/admin.html"            },

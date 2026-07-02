@@ -778,15 +778,15 @@ def download_logs_view():
             fetch="all",
         )
 
-        def _fmt(dt):
-            return dt.strftime("%d/%m %H:%M") if dt else ""
-
+        # Envia o timestamp em ISO (UTC) — o navegador converte para o fuso
+        # local (Brasília) via fmtDateTime(), igual às demais colunas de data
+        # do painel. Formatar a data em Python aqui causava exibição em UTC.
         return jsonify({
             "total_sucesso": int(tot.get("s") or 0),
             "total_falhas":  int(tot.get("f") or 0),
             "por_erro":      [{"erro": r["erro"], "n": r["n"]} for r in (por_erro or [])],
-            "falhas":        [{"quando": _fmt(r["created_at"]), "cnpj": r["cnpj"],
-                               "erro": r["erro"], "email": r["email"]} for r in (falhas or [])],
+            "falhas":        [{"quando": r["created_at"].isoformat() if r["created_at"] else None,
+                               "cnpj": r["cnpj"], "erro": r["erro"], "email": r["email"]} for r in (falhas or [])],
         })
     except Exception as exc:
         return jsonify({"error": f"Erro ao carregar falhas: {exc}"}), 500

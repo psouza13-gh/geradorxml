@@ -722,7 +722,7 @@ async function _loadFalhas() {
     const rows = data.falhas || [];
     $('falhas-empty').classList.toggle('hidden', rows.length > 0);
     $('falhas-tbody').innerHTML = rows.map(r => `<tr class="border-b border-gray-800/60">
-      <td class="py-2 pr-3 text-gray-400 whitespace-nowrap">${esc(r.quando)}</td>
+      <td class="py-2 pr-3 text-gray-400 whitespace-nowrap">${esc(fmtDateTime(r.quando))}</td>
       <td class="py-2 pr-3 text-gray-300">${esc(r.email || '—')}</td>
       <td class="py-2 pr-3 text-gray-400 whitespace-nowrap">${esc(r.cnpj || '—')}</td>
       <td class="py-2 pr-3 text-red-300">${esc(r.erro || '—')}</td>

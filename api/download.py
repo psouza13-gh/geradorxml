@@ -294,6 +294,25 @@ def download():
 
     user_id = jwt_payload["sub"]
 
+    # ── CNPJ must be a registered client (or already used before this rule) ──
+    # Enforced server-side regardless of what the UI allows — closes the
+    # loophole of posting an arbitrary CNPJ directly to this endpoint.
+    # Grandfather clause: any CNPJ with prior successful-usage history for this
+    # user is still allowed, so existing active users are never locked out by
+    # this change even if they never registered a client before.
+    known_cnpj = execute(
+        "SELECT 1 FROM clients WHERE user_id = %s AND cnpj = %s "
+        "UNION SELECT 1 FROM monthly_usage WHERE user_id = %s AND cnpj = %s "
+        "LIMIT 1",
+        (user_id, cnpj, user_id, cnpj),
+        fetch="one",
+    )
+    if not known_cnpj:
+        return jsonify({
+            "error": "Este CNPJ ainda não está cadastrado. Cadastre-o na aba "
+                     "\"Clientes\" antes de baixar as NFS-e.",
+        }), 400
+
     # ── Subscription / trial check ──────────────────────────────────────────────
     allowed, msg = verificar_e_registrar_download(user_id, cnpj)
     if not allowed:

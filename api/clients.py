@@ -2,9 +2,15 @@
 /api/clients — saved clients CRUD (Vercel serverless)
 
   GET    /api/clients          — list user's clients
-  POST   /api/clients          — create client
-  PUT    /api/clients/<id>     — update client (blocked if trial-locked)
-  DELETE /api/clients/<id>     — delete client (blocked if trial-locked)
+  POST   /api/clients          — create client (CNPJ validado por checksum)
+  PUT    /api/clients/<id>     — SEMPRE bloqueado — cadastro é definitivo
+  DELETE /api/clients/<id>     — SEMPRE bloqueado — cadastro é definitivo
+  GET    /api/clients/lookup   — consulta best-effort do nome da empresa (BrasilAPI)
+
+Cadastro é definitivo por design: uma vez salvo, nome/CNPJ não podem mais ser
+alterados ou excluídos por autoatendimento (evita erro de digitação silencioso
+e mantém o CNPJ usado em cada download rastreável). Correções pontuais, se
+necessárias, são feitas manualmente pelo admin (fora desta API).
 """
 import sys, os, uuid, re
 from datetime import datetime, timezone
@@ -15,10 +21,9 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from app.services.auth_service import verify_token
-from app.services.subscription_service import (
-    cliente_bloqueado_por_trial,
-    get_cnpj_limite,
-)
+from app.services.subscription_service import get_cnpj_limite
+from app.services.validators import validate_cnpj
+from app.services.cnpj_lookup import lookup_cnpj
 from app.services.db import execute
 
 app = Flask(__name__)
@@ -55,6 +60,27 @@ def _strip_cnpj(v: str) -> str:
 @app.route("/api/clients/<path:_>", methods=["OPTIONS"])
 def preflight(_=None):
     return app.response_class("", 204)
+
+
+# ── GET /api/clients/lookup?cnpj=... ───────────────────────────────────────────
+# Consulta best-effort (BrasilAPI) para auto-preencher o nome da empresa na
+# tela de confirmação do cadastro. Nunca falha "alto": se a consulta externa
+# não responder, retorna encontrado=false e o usuário confirma manualmente.
+
+@app.route("/api/clients/lookup", methods=["GET"])
+def lookup():
+    payload = _require_auth()
+    if not payload:
+        return jsonify({"error": "Não autenticado."}), 401
+
+    cnpj = _strip_cnpj(request.args.get("cnpj") or "")
+    if not validate_cnpj(cnpj):
+        return jsonify({"error": "CNPJ inválido."}), 400
+
+    info = lookup_cnpj(cnpj)
+    if not info:
+        return jsonify({"encontrado": False})
+    return jsonify({"encontrado": True, "nome": info["nome"], "situacao": info.get("situacao", "")})
 
 
 # ── Collection ────────────────────────────────────────────────────────────────
@@ -112,6 +138,8 @@ def clients():
         return jsonify({"error": "Dados muito longos."}), 400
     if not cnpj or len(cnpj) != 14:
         return jsonify({"error": "CNPJ inválido (14 dígitos sem máscara)."}), 400
+    if not validate_cnpj(cnpj):
+        return jsonify({"error": "CNPJ inválido — confira os números digitados."}), 400
 
     try:
         user = execute(
@@ -180,58 +208,17 @@ def client_detail(client_id: str):
 
     user_id = payload["sub"]
 
-    # ── PUT — update ───────────────────────────────────────────────────────
+    # ── PUT — bloqueado: cadastro é definitivo (evita erro de digitação
+    # silencioso e mantém rastreabilidade do CNPJ usado em cada download) ───
     if request.method == "PUT":
-        if cliente_bloqueado_por_trial(user_id, client_id):
-            return jsonify({
-                "error": "Este cliente está bloqueado: o CNPJ do trial não pode ser "
-                         "alterado após o primeiro download.",
-            }), 403
-
-        data             = request.get_json(silent=True) or {}
-        nome             = (data.get("nome")             or "").strip()
-        cnpj             = _strip_cnpj(data.get("cnpj")  or "")
-        municipio_codigo = (data.get("municipio_codigo") or "").strip()
-        municipio_nome   = (data.get("municipio_nome")   or "").strip()
-
-        if not nome:
-            return jsonify({"error": "Nome é obrigatório."}), 400
-        if len(nome) > 120 or len(municipio_nome) > 120 or len(municipio_codigo) > 20:
-            return jsonify({"error": "Dados muito longos."}), 400
-        if not cnpj or len(cnpj) != 14:
-            return jsonify({"error": "CNPJ inválido."}), 400
-
-        try:
-            execute(
-                """
-                UPDATE clients
-                SET nome = %s, cnpj = %s, municipio_codigo = %s, municipio_nome = %s
-                WHERE id = %s AND user_id = %s
-                """,
-                (nome, cnpj, municipio_codigo, municipio_nome, client_id, user_id),
-            )
-            return jsonify({
-                "id":               client_id,
-                "nome":             nome,
-                "cnpj":             cnpj,
-                "municipio_codigo": municipio_codigo,
-                "municipio_nome":   municipio_nome,
-            })
-        except Exception:
-            return jsonify({"error": "Erro ao atualizar cliente."}), 500
-
-    # ── DELETE ─────────────────────────────────────────────────────────────
-    if cliente_bloqueado_por_trial(user_id, client_id):
         return jsonify({
-            "error": "Este cliente está bloqueado: não é possível excluir o CNPJ "
-                     "do trial após o primeiro download.",
+            "error": "Este cliente é definitivo: nome e CNPJ não podem ser "
+                     "alterados após o cadastro. Se precisar corrigir um dado, "
+                     "fale com o suporte.",
         }), 403
 
-    try:
-        execute(
-            "DELETE FROM clients WHERE id = %s AND user_id = %s",
-            (client_id, user_id),
-        )
-        return jsonify({"ok": True})
-    except Exception:
-        return jsonify({"error": "Erro ao excluir cliente."}), 500
+    # ── DELETE — bloqueado pelo mesmo motivo ─────────────────────────────────
+    return jsonify({
+        "error": "Este cliente é definitivo: não pode ser excluído após o "
+                 "cadastro. Se precisar remover, fale com o suporte.",
+    }), 403

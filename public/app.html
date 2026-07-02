@@ -93,16 +93,26 @@
 ══════════════════════════════════════════════════════ -->
 <div id="page-download" class="max-w-2xl mx-auto p-6 space-y-5">
 
-  <!-- Client selector -->
+  <!-- Client selector (obrigatório — não é mais permitido digitar CNPJ livremente) -->
   <div id="client-selector-block" class="bg-gray-900 border border-gray-800 rounded-2xl p-4">
     <div class="flex items-center justify-between mb-3">
-      <span class="text-sm font-medium text-gray-300">Cliente salvo</span>
+      <span class="text-sm font-medium text-gray-300">Cliente <span class="text-red-400">*</span></span>
       <button onclick="showTab('clientes')" class="text-xs text-blue-400 hover:text-blue-300">+ Gerenciar clientes</button>
     </div>
-    <select id="client-select" onchange="fillFromClient()"
+    <select id="client-select" onchange="fillFromClient()" required
       class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
-      <option value="">— Selecione um cliente salvo (opcional) —</option>
+      <option value="">— Selecione o cliente —</option>
     </select>
+  </div>
+
+  <!-- Aviso: sem clientes cadastrados ainda -->
+  <div id="no-clients-notice" class="hidden bg-amber-900/20 border border-amber-700/40 rounded-2xl p-5 text-center space-y-3">
+    <p class="text-sm text-amber-300">Você ainda não tem nenhum cliente cadastrado.</p>
+    <p class="text-xs text-gray-400">Cadastre um cliente (Nome + CNPJ) para poder baixar as NFS-e dele.</p>
+    <button onclick="showTab('clientes')"
+      class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-xl text-sm transition">
+      + Cadastrar cliente
+    </button>
   </div>
 
   <!-- Main form -->
@@ -110,17 +120,8 @@
     <h2 class="font-semibold text-white">Configurar Download</h2>
     <form id="form" class="space-y-4">
 
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="label">CNPJ <span class="text-red-400">*</span></label>
-          <input id="cnpj" name="cnpj" type="text" placeholder="00.000.000/0001-00" required
-            class="input"/>
-        </div>
-        <div>
-          <label class="label">Nome / Razão Social</label>
-          <input id="nome" name="nome" type="text" placeholder="Empresa LTDA" class="input"/>
-        </div>
-      </div>
+      <input id="cnpj" name="cnpj" type="hidden"/>
+      <input id="nome" name="nome" type="hidden"/>
 
       <!-- Auth method: certificado digital A1 (único método disponível por enquanto) -->
       <div>
@@ -262,8 +263,10 @@
     <!-- Client form -->
     <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
       <h2 id="form-title" class="font-semibold text-white mb-4">Novo Cliente</h2>
-      <div class="space-y-4">
-        <input type="hidden" id="client-id"/>
+      <input type="hidden" id="client-id"/>
+
+      <!-- Step 1: digitar dados -->
+      <div id="cf-step1" class="space-y-4">
         <div>
           <label class="label">Nome / Razão Social <span class="text-red-400">*</span></label>
           <input id="c-nome" type="text" placeholder="Empresa LTDA" class="input"/>
@@ -275,16 +278,56 @@
         <p class="text-xs text-gray-500">
           Certificado e senha NÃO são salvos — você os informa na hora do download.
         </p>
+        <p class="text-xs text-amber-400/90">
+          ⚠️ Confira os dados com atenção: após salvo, o cadastro é definitivo e não pode ser editado ou excluído.
+        </p>
+        <button onclick="_cfVerificar()"
+          class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-xl text-sm transition">
+          Verificar e continuar →
+        </button>
+      </div>
+
+      <!-- Step 2: confirmação -->
+      <div id="cf-step2" class="hidden space-y-4">
+        <div class="bg-gray-800/60 border border-gray-700 rounded-xl p-4 space-y-2">
+          <div class="text-xs text-gray-500">Confirme os dados antes de salvar</div>
+          <div class="text-sm text-white font-medium" id="cf-confirm-nome"></div>
+          <div class="text-sm text-gray-300" id="cf-confirm-cnpj"></div>
+          <div id="cf-confirm-lookup" class="text-xs mt-1"></div>
+        </div>
+        <label class="flex items-start gap-2.5 text-sm text-gray-300 cursor-pointer">
+          <input type="checkbox" id="cf-confirm-check" onchange="$('cf-save-btn').disabled=!this.checked" class="mt-0.5"/>
+          <span>Confirmo que os dados acima estão corretos. Sei que <b>não poderei editar ou excluir</b> este cadastro depois de salvo.</span>
+        </label>
         <div class="flex gap-3 pt-1">
-          <button onclick="saveClientForm()"
-            class="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-xl text-sm transition">
+          <button onclick="_cfVoltar()"
+            class="px-4 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 rounded-xl text-sm transition">
+            ← Corrigir
+          </button>
+          <button onclick="saveClientForm()" id="cf-save-btn" disabled
+            class="flex-1 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-xl text-sm transition">
             Salvar Cliente
           </button>
-          <button onclick="deleteClient()" id="btn-delete"
-            class="hidden px-4 bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-600/30 rounded-xl text-sm transition">
-            Excluir
-          </button>
         </div>
+      </div>
+
+      <!-- Read-only view (cliente já cadastrado) -->
+      <div id="cf-view" class="hidden space-y-4">
+        <div>
+          <label class="label">Nome / Razão Social</label>
+          <div class="input opacity-70 cursor-not-allowed" id="cf-view-nome"></div>
+        </div>
+        <div>
+          <label class="label">CNPJ</label>
+          <div class="input opacity-70 cursor-not-allowed" id="cf-view-cnpj"></div>
+        </div>
+        <p class="text-xs text-gray-500">
+          🔒 Cadastro definitivo — não pode ser editado ou excluído. Precisa corrigir algo? Fale com o suporte.
+        </p>
+        <button onclick="newClientForm()"
+          class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-xl text-sm transition">
+          + Cadastrar outro cliente
+        </button>
       </div>
     </div>
   </div>
@@ -370,8 +413,7 @@ function setPeriod(p) {
   });
 })();
 
-// ── CNPJ mask on download form ─────────────────────────────────────────────────
-$('cnpj').addEventListener('input', function(){ this.value=fmtCNPJ(this.value); });
+// ── CNPJ mask no cadastro de cliente ────────────────────────────────────────────
 $('c-cnpj').addEventListener('input', function(){ this.value=fmtCNPJ(this.value); });
 
 // ── Status display ─────────────────────────────────────────────────────────────
@@ -403,6 +445,7 @@ function setLoading(on) {
 
 $('form').addEventListener('submit', async e => {
   e.preventDefault();
+  if(!$('cnpj').value) { alert('Selecione um cliente cadastrado antes de baixar.'); return; }
   $('status').classList.add('hidden');
   $('log-box').classList.add('hidden');
   setLoading(true);
@@ -549,10 +592,10 @@ async function renderClientList() {
     return;
   }
   el.innerHTML = list.map(c=>`
-    <div class="client-card${c.locked?' border-yellow-600/40':''}" onclick="editClient('${c.id}')">
+    <div class="client-card" onclick="viewClient('${c.id}')">
       <div class="font-medium text-sm text-white flex items-center gap-2">
         ${escHtml(c.nome||'(sem nome)')}
-        ${c.locked ? '<span class="text-xs text-yellow-400 font-normal">🔒 trial</span>' : ''}
+        <span class="text-xs text-gray-500 font-normal">🔒</span>
       </div>
       <div class="text-xs text-gray-400 mt-0.5">${fmtCNPJ(c.cnpj||'')}${c.municipio_nome?' · '+escHtml(c.municipio_nome):''}</div>
     </div>
@@ -568,39 +611,94 @@ function newClientForm() {
   $('c-nome').value    = '';
   $('c-cnpj').value    = '';
   $('form-title').textContent = 'Novo Cliente';
-  $('btn-delete').classList.add('hidden');
+  $('cf-step1').classList.remove('hidden');
+  $('cf-step2').classList.add('hidden');
+  $('cf-view').classList.add('hidden');
+  $('cf-confirm-check').checked = false;
+  $('cf-save-btn').disabled = true;
   document.querySelectorAll('.client-card').forEach(el=>el.classList.remove('selected'));
 }
 
-async function editClient(id) {
+async function viewClient(id) {
   const list = await fetchClients();
   const c = list.find(x=>x.id===id);
   if(!c) return;
   $('client-id').value = c.id;
-  $('c-nome').value    = c.nome || '';
-  $('c-cnpj').value    = fmtCNPJ(c.cnpj||'');
-  $('form-title').textContent = c.locked ? 'Ver Cliente (bloqueado)' : 'Editar Cliente';
-  $('btn-delete').classList.toggle('hidden', !!c.locked);
+  $('form-title').textContent = 'Ver Cliente';
+  $('cf-view-nome').textContent = c.nome || '';
+  $('cf-view-cnpj').textContent = fmtCNPJ(c.cnpj||'');
+  $('cf-step1').classList.add('hidden');
+  $('cf-step2').classList.add('hidden');
+  $('cf-view').classList.remove('hidden');
   document.querySelectorAll('.client-card').forEach(el=>{
-    el.classList.toggle('selected', el.getAttribute('onclick')||'' === `editClient('${id}')`);
+    el.classList.toggle('selected', el.getAttribute('onclick')||'' === `viewClient('${id}')`);
   });
 }
 
-async function saveClientForm() {
+// Step 1 -> Step 2: valida localmente, tenta confirmar o nome via consulta
+// pública (best-effort — se falhar, segue sem bloquear) e mostra a confirmação.
+async function _cfVerificar() {
   const nome = $('c-nome').value.trim();
   const cnpj = stripCNPJ($('c-cnpj').value);
-  if(!nome||!cnpj) { alert('Preencha Nome e CNPJ.'); return; }
+  if(!nome) { alert('Preencha o Nome / Razão Social.'); return; }
   if(cnpj.length !== 14) { alert('CNPJ inválido — informe os 14 dígitos.'); return; }
+  if(!validarCNPJ(cnpj)) { alert('CNPJ inválido — confira os números digitados.'); return; }
 
-  const existingId = $('client-id').value;
+  $('cf-confirm-nome').textContent = nome;
+  $('cf-confirm-cnpj').textContent = fmtCNPJ(cnpj);
+  $('cf-confirm-lookup').innerHTML = '<span class="text-gray-500">Consultando dados públicos…</span>';
+  $('cf-confirm-check').checked = false;
+  $('cf-save-btn').disabled = true;
+  $('cf-step1').classList.add('hidden');
+  $('cf-step2').classList.remove('hidden');
+
+  try {
+    const resp = await fetch(`/api/clients/lookup?cnpj=${cnpj}`, { headers: authHdrs() });
+    const data = await resp.json();
+    if(data.encontrado) {
+      $('cf-confirm-lookup').innerHTML =
+        `<span class="text-green-400">✓ Confirmado na base pública:</span> ${escHtml(data.nome)}` +
+        (data.situacao ? ` <span class="text-gray-500">(${escHtml(data.situacao)})</span>` : '');
+    } else {
+      $('cf-confirm-lookup').innerHTML =
+        '<span class="text-yellow-500">⚠ Não foi possível confirmar automaticamente — confira os dados acima com atenção.</span>';
+    }
+  } catch(e) {
+    $('cf-confirm-lookup').innerHTML =
+      '<span class="text-yellow-500">⚠ Não foi possível confirmar automaticamente — confira os dados acima com atenção.</span>';
+  }
+}
+
+function _cfVoltar() {
+  $('cf-step2').classList.add('hidden');
+  $('cf-step1').classList.remove('hidden');
+}
+
+// Validação de CNPJ (checksum mod-11) — mesma regra usada no servidor,
+// só para dar feedback imediato antes de chamar a API.
+function validarCNPJ(cnpj) {
+  if(!/^\d{14}$/.test(cnpj) || /^(\d)\1{13}$/.test(cnpj)) return false;
+  const calc = (base, pesos) => {
+    let soma = 0;
+    for(let i=0;i<pesos.length;i++) soma += parseInt(base[i],10)*pesos[i];
+    const resto = soma % 11;
+    return resto < 2 ? 0 : 11-resto;
+  };
+  const d1 = calc(cnpj.slice(0,12), [5,4,3,2,9,8,7,6,5,4,3,2]);
+  const d2 = calc(cnpj.slice(0,12)+d1, [6,5,4,3,2,9,8,7,6,5,4,3,2]);
+  return cnpj.slice(-2) === `${d1}${d2}`;
+}
+
+async function saveClientForm() {
+  if(!$('cf-confirm-check').checked) return;
+  const nome = $('c-nome').value.trim();
+  const cnpj = stripCNPJ($('c-cnpj').value);
 
   const payload = { nome, cnpj, municipio_codigo: '', municipio_nome: '' };
 
   try {
-    const url    = existingId ? `/api/clients/${existingId}` : '/api/clients';
-    const method = existingId ? 'PUT' : 'POST';
-    const resp   = await fetch(url, {
-      method,
+    const resp = await fetch('/api/clients', {
+      method: 'POST',
       headers: { ...authHdrs(), 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
@@ -616,30 +714,10 @@ async function saveClientForm() {
   }
 }
 
-async function deleteClient() {
-  const id = $('client-id').value;
-  if(!id || !confirm('Excluir este cliente?')) return;
-  try {
-    const resp = await fetch(`/api/clients/${id}`, {
-      method: 'DELETE',
-      headers: authHdrs(),
-    });
-    const data = await resp.json();
-    if(!resp.ok) { alert(data.error || 'Erro ao excluir cliente.'); return; }
-
-    _clientsCache = null;
-    await renderClientList();
-    await refreshClientSelect();
-    newClientForm();
-  } catch(e) {
-    alert('Erro de conexão. Tente novamente.');
-  }
-}
-
 // Fill download form from selected client
 async function fillFromClient() {
   const id = $('client-select').value;
-  if(!id) return;
+  if(!id) { $('cnpj').value=''; $('nome').value=''; return; }
   const list = await fetchClients();
   const c = list.find(x=>x.id===id);
   if(!c) return;
@@ -653,7 +731,7 @@ async function refreshClientSelect() {
   const sel  = $('client-select');
   const prev = sel.value;
   const list = await fetchClients();
-  sel.innerHTML = '<option value="">— Selecione um cliente salvo (opcional) —</option>';
+  sel.innerHTML = '<option value="">— Selecione o cliente —</option>';
   list.forEach(c=>{
     const opt = document.createElement('option');
     opt.value       = c.id;
@@ -661,6 +739,12 @@ async function refreshClientSelect() {
     sel.appendChild(opt);
   });
   if(prev) sel.value = prev;
+
+  // Bloqueia o download até existir ao menos 1 cliente cadastrado.
+  const noClients = list.length === 0;
+  $('no-clients-notice').classList.toggle('hidden', !noClients);
+  $('form').classList.toggle('hidden', noClients);
+  sel.required = !noClients;
 }
 
 // ════════════════════════════════════════════════════════

@@ -158,6 +158,17 @@
     </div>
   </section>
 
+  <!-- ── ERROS DE WEBHOOK (ex.: pagamentos Stripe que falharam ao processar) ── -->
+  <section class="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+    <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
+      <h2 class="text-sm font-semibold text-white">Erros de webhook (Stripe, etc.)</h2>
+      <button onclick="_loadWebhookErrors()" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg px-3 py-1.5 text-xs font-medium transition">Atualizar</button>
+    </div>
+    <p class="text-xs text-gray-500 mb-3">Exceções capturadas antes de um webhook retornar erro 500 (ex.: ativação de plano que falhou).</p>
+    <div id="webhook-errors-empty" class="hidden text-center text-gray-500 text-xs py-8">Nenhum erro registrado. 🎉</div>
+    <div id="webhook-errors-list" class="space-y-2"></div>
+  </section>
+
   <!-- ── INTEGRAÇÃO: META CONVERSIONS API ──────────────── -->
   <section class="bg-gray-900 border border-gray-800 rounded-2xl p-4">
     <div class="flex items-center justify-between gap-3 flex-wrap mb-1">
@@ -729,6 +740,30 @@ async function _loadFalhas() {
     </tr>`).join('');
   } catch (e) {
     resumo.textContent = 'Erro de conexão. Tente novamente.';
+  }
+}
+
+async function _loadWebhookErrors() {
+  const list = $('webhook-errors-list');
+  list.innerHTML = '<p class="text-xs text-gray-500 text-center py-4">Carregando…</p>';
+  try {
+    const resp = await fetch('/api/admin/webhook-errors', { headers: authHdrs() });
+    const data = await resp.json();
+    if (!resp.ok) { list.innerHTML = `<p class="text-xs text-red-400">${esc(data.error || 'Erro ao carregar.')}</p>`; return; }
+
+    const rows = data.erros || [];
+    $('webhook-errors-empty').classList.toggle('hidden', rows.length > 0);
+    list.innerHTML = rows.map(r => `
+      <div class="bg-gray-800/50 border border-red-900/40 rounded-lg p-3">
+        <div class="flex items-center justify-between text-xs text-gray-400 mb-1.5">
+          <span><b class="text-gray-200">${esc(r.origem)}</b> · ${esc(r.evento || '—')}</span>
+          <span>${esc(fmtDateTime(r.quando))}</span>
+        </div>
+        <pre class="text-xs text-red-300 whitespace-pre-wrap break-all">${esc(r.erro || '')}</pre>
+      </div>
+    `).join('');
+  } catch (e) {
+    list.innerHTML = '<p class="text-xs text-red-400">Erro de conexão. Tente novamente.</p>';
   }
 }
 

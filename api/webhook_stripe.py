@@ -4,6 +4,8 @@
 Configure no painel Stripe:
   URL:    https://geradorxml.vercel.app/api/webhook/stripe
   Events: checkout.session.completed
+          checkout.session.async_payment_succeeded   ← ADICIONAR (boleto pago)
+          checkout.session.async_payment_failed       ← ADICIONAR (boleto expirou)
           invoice.payment_succeeded
           invoice.payment_failed
           customer.subscription.deleted
@@ -11,6 +13,18 @@ Configure no painel Stripe:
 
 Environment:
   STRIPE_WEBHOOK_SECRET — signing secret (whsec_...) shown after creating the endpoint
+
+── Boleto (pagamento assíncrono) ──────────────────────────────────────────────
+Cartão confirma o pagamento na hora (payment_status='paid' já em
+checkout.session.completed). Boleto NÃO: o evento checkout.session.completed
+dispara assim que o boleto é EMITIDO, com payment_status='unpaid' — o
+pagamento só compensa dias depois. Por isso:
+  • checkout.session.completed com payment_status != 'paid' → NÃO concede
+    acesso ainda, só vincula o stripe_customer_id ao usuário (para que o
+    evento de confirmação, mais tarde, consiga encontrá-lo).
+  • checkout.session.async_payment_succeeded → é o sinal definitivo de que
+    o boleto foi PAGO de fato. É aqui que o acesso é concedido.
+  • invoice.payment_succeeded continua como rede de segurança redundante.
 """
 import sys, os, traceback
 from datetime import datetime, timezone
@@ -103,12 +117,49 @@ def _activate_plan(
     )
 
 
+def _link_stripe_customer(user_id: str, stripe_customer_id: str, stripe_subscription_id: str) -> None:
+    """
+    Persist Stripe identifiers on the user WITHOUT granting plan access.
+    Used when checkout.session.completed fires for an async payment method
+    (boleto) that hasn't cleared yet — so that the later confirmation event
+    (checkout.session.async_payment_succeeded / invoice.payment_succeeded)
+    can find this user via _find_user_by_stripe_customer.
+    """
+    execute(
+        "UPDATE users SET stripe_customer_id = %s, stripe_subscription_id = %s WHERE id = %s",
+        (stripe_customer_id, stripe_subscription_id, user_id),
+    )
+
+
 def _find_user_by_stripe_customer(stripe_customer_id: str) -> dict | None:
     return execute(
         "SELECT id, email, plano FROM users WHERE stripe_customer_id = %s",
         (stripe_customer_id,),
         fetch="one",
     )
+
+
+def _grant_paid_access(user: dict, plano: str, stripe_customer: str, stripe_sub: str, event_id: str) -> None:
+    """
+    Confirmed-payment path shared by checkout.session.completed (card, or
+    boleto already paid), checkout.session.async_payment_succeeded (boleto
+    just cleared) and invoice.payment_succeeded (renewals). Activates the
+    plan and fires the Meta Ads Purchase event once, on first conversion.
+    """
+    plano_anterior = (user.get("plano") or "trial").lower()
+    _activate_plan(str(user["id"]), plano, stripe_customer, stripe_sub)
+
+    if plano_anterior == "trial":
+        try:
+            track_purchase(
+                user_id=str(user["id"]),
+                email=user.get("email"),
+                plano=plano,
+                value=_VALORES.get(plano, 0.0),
+                event_id_suffix=event_id,
+            )
+        except Exception:
+            pass  # Never block the webhook response on tracking errors
 
 
 def _plano_from_invoice(invoice_data: dict) -> str | None:
@@ -155,14 +206,18 @@ def webhook():
     # instead of vanishing into an opaque 500).
     try:
         # ══ checkout.session.completed ════════════════════════════════════
-        # Fired once when a user completes the Stripe Checkout flow and pays.
-        # This is the primary activation event.
+        # Dispara quando o checkout é concluído. Para cartão, o pagamento já
+        # está confirmado aqui (payment_status='paid') — concede acesso.
+        # Para boleto, dispara na EMISSÃO do boleto (payment_status='unpaid')
+        # — só vincula o cliente Stripe; o acesso vem depois, via
+        # checkout.session.async_payment_succeeded.
         if etype == "checkout.session.completed":
             meta            = data.get("metadata") or {}
             user_id         = meta.get("user_id")
             plano           = (meta.get("plano") or "starter").lower()
             stripe_customer = data.get("customer")  or ""
             stripe_sub      = data.get("subscription") or ""
+            payment_status  = data.get("payment_status") or ""
 
             if not user_id or not stripe_customer:
                 return jsonify({"ok": True, "msg": "missing metadata — skipped"}), 200
@@ -175,23 +230,37 @@ def webhook():
             if not user:
                 return jsonify({"ok": True, "msg": "user not found"}), 200
 
-            plano_anterior = (user.get("plano") or "trial").lower()
-            _activate_plan(user_id, plano, stripe_customer, stripe_sub)
+            if payment_status == "paid":
+                _grant_paid_access(user, plano, stripe_customer, stripe_sub, str(data.get("id") or ""))
+            else:
+                # Pagamento assíncrono (boleto) ainda não compensou — vincula
+                # o cliente para o evento de confirmação encontrar depois.
+                _link_stripe_customer(user_id, stripe_customer, stripe_sub)
 
-            # Fire Meta Ads Purchase event only on the FIRST paid activation
-            # (trial → paid), not on subsequent renewals or upgrades, to avoid
-            # duplicate "Purchase" signals for the same customer.
-            if plano_anterior == "trial":
-                try:
-                    track_purchase(
-                        user_id=user_id,
-                        email=user.get("email"),
-                        plano=plano,
-                        value=_VALORES.get(plano, 0.0),
-                        event_id_suffix=str(data.get("id") or ""),
-                    )
-                except Exception:
-                    pass  # Never block the webhook response on tracking errors
+        # ══ checkout.session.async_payment_succeeded ═════════════════════════
+        # Sinal DEFINITIVO de que um pagamento assíncrono (boleto) foi pago.
+        elif etype == "checkout.session.async_payment_succeeded":
+            meta            = data.get("metadata") or {}
+            user_id         = meta.get("user_id")
+            plano           = (meta.get("plano") or "starter").lower()
+            stripe_customer = data.get("customer")  or ""
+            stripe_sub      = data.get("subscription") or ""
+
+            user = None
+            if user_id:
+                user = execute("SELECT id, email, plano FROM users WHERE id = %s", (user_id,), fetch="one")
+            if not user and stripe_customer:
+                user = _find_user_by_stripe_customer(stripe_customer)
+            if not user:
+                return jsonify({"ok": True, "msg": "user not found"}), 200
+
+            _grant_paid_access(user, plano, stripe_customer, stripe_sub, str(data.get("id") or ""))
+
+        # ══ checkout.session.async_payment_failed ════════════════════════════
+        # Boleto expirou sem ser pago. Conta permanece como estava (grátis) —
+        # nada a fazer; só evita cair no branch de erro por tipo desconhecido.
+        elif etype == "checkout.session.async_payment_failed":
+            pass
 
         # ══ invoice.payment_succeeded ═══════════════════════════════════════
         # Fired on each successful monthly renewal charge.
@@ -210,7 +279,7 @@ def webhook():
 
             # Detect current plan from the invoice's Price ID (handles upgrades)
             plano = _plano_from_invoice(data) or (user.get("plano") or "starter").lower()
-            _activate_plan(str(user["id"]), plano, stripe_customer, stripe_sub)
+            _grant_paid_access(user, plano, stripe_customer, stripe_sub, str(data.get("id") or ""))
 
         # ══ invoice.payment_failed ══════════════════════════════════════════
         # Fired when a renewal charge fails (e.g., expired card).

@@ -199,6 +199,16 @@ def webhook():
 
     etype = event["type"]
     data  = event["data"]["object"]
+    # stripe-python >=v10 returns a StripeObject (not a plain dict) here.
+    # StripeObject supports item access (obj["key"]) and attribute access
+    # (obj.key), but NOT the dict .get() method — calling .get() resolves to
+    # __getattr__('get'), which fails with AttributeError since there's no
+    # literal "get" key. This crashed EVERY event (100% of deliveries) since
+    # the .get()-based code below assumes a plain dict. Converting once here
+    # (recursively) makes the rest of this file's .get() calls work as
+    # written, at every nesting level.
+    if hasattr(data, "to_dict"):
+        data = data.to_dict()
 
     # Wrap the whole dispatch in try/except so a real bug is LOGGED before
     # the 500 propagates (Stripe still retries — correct for a payment

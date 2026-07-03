@@ -792,6 +792,34 @@ def download_logs_view():
         return jsonify({"error": f"Erro ao carregar falhas: {exc}"}), 500
 
 
+# ── GET /api/admin/webhook-errors ──────────────────────────────────────────────
+# Diagnóstico: exceções reais capturadas nos webhooks (ex.: Stripe) antes do
+# 500 ser retornado — ver api/webhook_stripe.py::_log_webhook_error.
+
+@app.route("/api/admin/webhook-errors", methods=["GET"])
+def webhook_errors_view():
+    if not _require_admin():
+        return jsonify({"error": "Acesso restrito ao administrador."}), 403
+    try:
+        rows = execute(
+            "SELECT origem, evento, erro, created_at FROM webhook_errors "
+            "ORDER BY created_at DESC LIMIT 50",
+            fetch="all",
+        )
+        return jsonify({
+            "erros": [
+                {
+                    "origem": r["origem"], "evento": r["evento"], "erro": r["erro"],
+                    "quando": r["created_at"].isoformat() if r["created_at"] else None,
+                }
+                for r in (rows or [])
+            ],
+        })
+    except Exception as exc:
+        # Tabela pode ainda não existir se nenhum erro foi logado ainda.
+        return jsonify({"erros": [], "info": str(exc)})
+
+
 # ── Integrations: Meta Conversions API ────────────────────────────────────────
 # GET   /api/admin/integrations/meta       — current config + token status
 # POST  /api/admin/integrations/meta       — update pixel id / toggles / test code

@@ -12,7 +12,7 @@ Configure no painel Stripe:
 Environment:
   STRIPE_WEBHOOK_SECRET — signing secret (whsec_...) shown after creating the endpoint
 """
-import sys, os
+import sys, os, traceback
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify
 
@@ -26,6 +26,32 @@ from app.services.stripe_service import construct_webhook_event, price_to_plano,
 from app.services.meta_capi_service import track_purchase
 
 app = Flask(__name__)
+
+
+def _log_webhook_error(etype: str, exc: Exception) -> None:
+    """
+    Best-effort: record the exact exception before re-raising, so a failed
+    webhook delivery (which Stripe will retry) becomes diagnosable instead of
+    a silent 500. Never lets a logging failure mask the original error.
+    """
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS webhook_errors (
+                id         BIGSERIAL PRIMARY KEY,
+                origem     TEXT NOT NULL,
+                evento     TEXT,
+                erro       TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        execute(
+            "INSERT INTO webhook_errors (origem, evento, erro) VALUES (%s, %s, %s)",
+            ("stripe", etype, f"{type(exc).__name__}: {exc}\n{traceback.format_exc()[-2000:]}"),
+        )
+    except Exception:
+        pass
 
 # ── Plan limits (keep in sync with subscription_service.PLANO_LIMITES) ────────
 _LIMITES: dict[str, int] = {
@@ -123,101 +149,110 @@ def webhook():
     etype = event["type"]
     data  = event["data"]["object"]
 
-    # ══ checkout.session.completed ════════════════════════════════════════
-    # Fired once when a user completes the Stripe Checkout flow and pays.
-    # This is the primary activation event.
-    if etype == "checkout.session.completed":
-        meta            = data.get("metadata") or {}
-        user_id         = meta.get("user_id")
-        plano           = (meta.get("plano") or "starter").lower()
-        stripe_customer = data.get("customer")  or ""
-        stripe_sub      = data.get("subscription") or ""
+    # Wrap the whole dispatch in try/except so a real bug is LOGGED before
+    # the 500 propagates (Stripe still retries — correct for a payment
+    # webhook — but the exact exception is now captured for diagnosis
+    # instead of vanishing into an opaque 500).
+    try:
+        # ══ checkout.session.completed ════════════════════════════════════
+        # Fired once when a user completes the Stripe Checkout flow and pays.
+        # This is the primary activation event.
+        if etype == "checkout.session.completed":
+            meta            = data.get("metadata") or {}
+            user_id         = meta.get("user_id")
+            plano           = (meta.get("plano") or "starter").lower()
+            stripe_customer = data.get("customer")  or ""
+            stripe_sub      = data.get("subscription") or ""
 
-        if not user_id or not stripe_customer:
-            return jsonify({"ok": True, "msg": "missing metadata — skipped"}), 200
+            if not user_id or not stripe_customer:
+                return jsonify({"ok": True, "msg": "missing metadata — skipped"}), 200
 
-        user = execute(
-            "SELECT id, email, plano FROM users WHERE id = %s",
-            (user_id,),
-            fetch="one",
-        )
-        if not user:
-            return jsonify({"ok": True, "msg": "user not found"}), 200
-
-        plano_anterior = (user.get("plano") or "trial").lower()
-        _activate_plan(user_id, plano, stripe_customer, stripe_sub)
-
-        # Fire Meta Ads Purchase event only on the FIRST paid activation
-        # (trial → paid), not on subsequent renewals or upgrades, to avoid
-        # duplicate "Purchase" signals for the same customer.
-        if plano_anterior == "trial":
-            try:
-                track_purchase(
-                    user_id=user_id,
-                    email=user.get("email"),
-                    plano=plano,
-                    value=_VALORES.get(plano, 0.0),
-                    event_id_suffix=str(data.get("id") or ""),
-                )
-            except Exception:
-                pass  # Never block the webhook response on tracking errors
-
-    # ══ invoice.payment_succeeded ═════════════════════════════════════════
-    # Fired on each successful monthly renewal charge.
-    # Ensures the account stays active even if the webhook for the original
-    # checkout was missed or retried.
-    elif etype == "invoice.payment_succeeded":
-        stripe_customer = data.get("customer") or ""
-        stripe_sub      = data.get("subscription") or ""
-
-        if not stripe_customer:
-            return jsonify({"ok": True}), 200
-
-        user = _find_user_by_stripe_customer(stripe_customer)
-        if not user:
-            return jsonify({"ok": True, "msg": "user not found"}), 200
-
-        # Detect current plan from the invoice's Price ID (handles upgrades)
-        plano = _plano_from_invoice(data) or (user.get("plano") or "starter").lower()
-        _activate_plan(str(user["id"]), plano, stripe_customer, stripe_sub)
-
-    # ══ invoice.payment_failed ════════════════════════════════════════════
-    # Fired when a renewal charge fails (e.g., expired card).
-    # Suspends the account — user keeps data but can't download.
-    elif etype == "invoice.payment_failed":
-        stripe_customer = data.get("customer") or ""
-        if stripe_customer:
-            execute(
-                "UPDATE users SET status = 'suspenso' WHERE stripe_customer_id = %s",
-                (stripe_customer,),
+            user = execute(
+                "SELECT id, email, plano FROM users WHERE id = %s",
+                (user_id,),
+                fetch="one",
             )
+            if not user:
+                return jsonify({"ok": True, "msg": "user not found"}), 200
 
-    # ══ customer.subscription.deleted ════════════════════════════════════
-    # Fired when a subscription is cancelled (by user via Customer Portal
-    # or by admin in the Stripe Dashboard).
-    elif etype == "customer.subscription.deleted":
-        stripe_customer = data.get("customer") or ""
-        if stripe_customer:
-            execute(
-                "UPDATE users SET status = 'cancelado', cancelled_at = NOW() WHERE stripe_customer_id = %s",
-                (stripe_customer,),
-            )
+            plano_anterior = (user.get("plano") or "trial").lower()
+            _activate_plan(user_id, plano, stripe_customer, stripe_sub)
 
-    # ══ customer.subscription.updated ════════════════════════════════════
-    # Fired on plan upgrades/downgrades via Stripe Customer Portal.
-    elif etype == "customer.subscription.updated":
-        stripe_customer = data.get("customer") or ""
-        stripe_sub      = data.get("id") or ""
+            # Fire Meta Ads Purchase event only on the FIRST paid activation
+            # (trial → paid), not on subsequent renewals or upgrades, to avoid
+            # duplicate "Purchase" signals for the same customer.
+            if plano_anterior == "trial":
+                try:
+                    track_purchase(
+                        user_id=user_id,
+                        email=user.get("email"),
+                        plano=plano,
+                        value=_VALORES.get(plano, 0.0),
+                        event_id_suffix=str(data.get("id") or ""),
+                    )
+                except Exception:
+                    pass  # Never block the webhook response on tracking errors
 
-        if not stripe_customer:
-            return jsonify({"ok": True}), 200
+        # ══ invoice.payment_succeeded ═══════════════════════════════════════
+        # Fired on each successful monthly renewal charge.
+        # Ensures the account stays active even if the webhook for the original
+        # checkout was missed or retried.
+        elif etype == "invoice.payment_succeeded":
+            stripe_customer = data.get("customer") or ""
+            stripe_sub      = data.get("subscription") or ""
 
-        user = _find_user_by_stripe_customer(stripe_customer)
-        if not user:
-            return jsonify({"ok": True}), 200
+            if not stripe_customer:
+                return jsonify({"ok": True}), 200
 
-        plano = _plano_from_subscription(data)
-        if plano:
+            user = _find_user_by_stripe_customer(stripe_customer)
+            if not user:
+                return jsonify({"ok": True, "msg": "user not found"}), 200
+
+            # Detect current plan from the invoice's Price ID (handles upgrades)
+            plano = _plano_from_invoice(data) or (user.get("plano") or "starter").lower()
             _activate_plan(str(user["id"]), plano, stripe_customer, stripe_sub)
+
+        # ══ invoice.payment_failed ══════════════════════════════════════════
+        # Fired when a renewal charge fails (e.g., expired card).
+        # Suspends the account — user keeps data but can't download.
+        elif etype == "invoice.payment_failed":
+            stripe_customer = data.get("customer") or ""
+            if stripe_customer:
+                execute(
+                    "UPDATE users SET status = 'suspenso' WHERE stripe_customer_id = %s",
+                    (stripe_customer,),
+                )
+
+        # ══ customer.subscription.deleted ═══════════════════════════════════
+        # Fired when a subscription is cancelled (by user via Customer Portal
+        # or by admin in the Stripe Dashboard).
+        elif etype == "customer.subscription.deleted":
+            stripe_customer = data.get("customer") or ""
+            if stripe_customer:
+                execute(
+                    "UPDATE users SET status = 'cancelado', cancelled_at = NOW() WHERE stripe_customer_id = %s",
+                    (stripe_customer,),
+                )
+
+        # ══ customer.subscription.updated ═══════════════════════════════════
+        # Fired on plan upgrades/downgrades via Stripe Customer Portal.
+        elif etype == "customer.subscription.updated":
+            stripe_customer = data.get("customer") or ""
+            stripe_sub      = data.get("id") or ""
+
+            if not stripe_customer:
+                return jsonify({"ok": True}), 200
+
+            user = _find_user_by_stripe_customer(stripe_customer)
+            if not user:
+                return jsonify({"ok": True}), 200
+
+            plano = _plano_from_subscription(data)
+            if plano:
+                _activate_plan(str(user["id"]), plano, stripe_customer, stripe_sub)
+
+    except Exception as exc:
+        _log_webhook_error(etype, exc)
+        raise
 
     return jsonify({"ok": True, "event": etype}), 200

@@ -319,6 +319,29 @@
       </button>
     </div>
 
+    <!-- Vincular à Stripe (recuperação manual) -->
+    <div class="border border-gray-800 rounded-xl p-4 space-y-3">
+      <h3 class="text-sm font-semibold text-white">Vincular à Stripe</h3>
+      <p class="text-xs text-gray-500">
+        Use quando um pagamento real já aconteceu na Stripe, mas o webhook não conseguiu vincular a conta
+        (ex.: falha antiga já corrigida). Cole os IDs do Dashboard da Stripe (Customers → cliente → Subscription).
+      </p>
+      <div>
+        <label class="block text-[11px] font-medium text-gray-400 mb-1.5">Customer ID</label>
+        <input id="m-stripe-cus" type="text" placeholder="cus_..."
+          class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"/>
+      </div>
+      <div>
+        <label class="block text-[11px] font-medium text-gray-400 mb-1.5">Subscription ID (opcional)</label>
+        <input id="m-stripe-sub" type="text" placeholder="sub_..."
+          class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"/>
+      </div>
+      <button onclick="_mLinkStripe()"
+        class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm py-2.5 rounded-lg transition">
+        Vincular à Stripe
+      </button>
+    </div>
+
     <!-- Quick actions -->
     <div class="border border-gray-800 rounded-xl p-4 space-y-2.5">
       <h3 class="text-sm font-semibold text-white">Ações rápidas</h3>
@@ -919,6 +942,30 @@ async function _mReativarGratis() {
     const data = await resp.json();
     if (!resp.ok) { _mShowErr(data.error || 'Erro ao reativar conta.'); return; }
     _mShowOk(data.msg || 'Conta reativada no plano gratuito.');
+    await _loadAll();
+    const updated = _uCache[_mUserId];
+    if (updated) $('m-user-info').textContent = `${updated.nome} · ${updated.email} · plano atual: ${PLANO_LABEL[updated.plano] || updated.plano} (${updated.status})`;
+  } catch (e) {
+    _mShowErr('Erro de conexão. Tente novamente.');
+  }
+}
+
+async function _mLinkStripe() {
+  if (!_mUserId) return;
+  const cus = $('m-stripe-cus').value.trim();
+  const sub = $('m-stripe-sub').value.trim();
+  if (!cus.startsWith('cus_')) { alert('Informe um Customer ID válido (começa com cus_).'); return; }
+  if (!confirm('Vincular esta conta à Stripe com esses IDs? A origem da assinatura passará a ser "Stripe".')) return;
+
+  try {
+    const resp = await fetch(`/api/admin/users/${_mUserId}/link-stripe`, {
+      method: 'POST',
+      headers: { ...authHdrs(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stripe_customer_id: cus, stripe_subscription_id: sub }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { _mShowErr(data.error || 'Erro ao vincular à Stripe.'); return; }
+    _mShowOk(data.msg || 'Vinculado à Stripe com sucesso.');
     await _loadAll();
     const updated = _uCache[_mUserId];
     if (updated) $('m-user-info').textContent = `${updated.nome} · ${updated.email} · plano atual: ${PLANO_LABEL[updated.plano] || updated.plano} (${updated.status})`;

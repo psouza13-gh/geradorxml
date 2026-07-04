@@ -26,6 +26,7 @@ if ROOT not in sys.path:
 from app.services.auth_service import verify_token
 from app.services.db import execute
 from app.services.crypto_service import decrypt
+from app.services.subscription_service import get_cnpj_limite
 from app.services import meta_capi_service as meta_capi
 from app.services.email_service import (
     send_engagement_welcome,
@@ -561,6 +562,61 @@ def delete_subscription(user_id):
         return jsonify({"ok": True, "msg": "Assinatura removida. Conta voltou ao estado padrão (cancelada/sem plano ativo)."})
     except Exception as exc:
         return jsonify({"error": f"Erro ao excluir assinatura: {exc}"}), 500
+
+
+# ── POST /api/admin/users/<id>/link-stripe ────────────────────────────────────
+# Ferramenta de recuperação: vincula manualmente um usuário a um cliente/
+# assinatura já existente na Stripe (ex.: quando um webhook falhou antes de
+# uma correção e o vínculo nunca foi gravado). Mantém o plano atual do
+# usuário, marca a origem como 'stripe' e recalcula o limite de CNPJs.
+
+@app.route("/api/admin/users/<user_id>/link-stripe", methods=["POST"])
+def link_stripe(user_id):
+    if not _require_admin():
+        return jsonify({"error": "Acesso restrito ao administrador."}), 403
+
+    data = request.get_json(silent=True) or {}
+    stripe_customer_id     = (data.get("stripe_customer_id") or "").strip()
+    stripe_subscription_id = (data.get("stripe_subscription_id") or "").strip()
+
+    if not stripe_customer_id.startswith("cus_"):
+        return jsonify({"error": "Customer ID inválido (deve começar com 'cus_')."}), 400
+    if stripe_subscription_id and not stripe_subscription_id.startswith("sub_"):
+        return jsonify({"error": "Subscription ID inválido (deve começar com 'sub_')."}), 400
+
+    try:
+        user = execute("SELECT id, plano, is_admin FROM users WHERE id = %s", (user_id,), fetch="one")
+        if not user:
+            return jsonify({"error": "Usuário não encontrado."}), 404
+        if user["is_admin"]:
+            return jsonify({"error": "Não é possível alterar uma conta de administrador."}), 400
+
+        plano   = (user["plano"] or "starter").lower()
+        limite  = get_cnpj_limite(plano)
+
+        execute(
+            """
+            UPDATE users
+               SET status                 = 'ativo',
+                   plano_origem           = 'stripe',
+                   vitalicio              = FALSE,
+                   acesso_expires_at      = NULL,
+                   trial_expires_at       = NULL,
+                   trial_locked_cnpj      = NULL,
+                   cnpj_limite            = %s,
+                   stripe_customer_id     = %s,
+                   stripe_subscription_id = %s,
+                   cancelled_at           = NULL
+             WHERE id = %s
+            """,
+            (limite, stripe_customer_id, stripe_subscription_id or None, user_id),
+        )
+        return jsonify({
+            "ok": True,
+            "msg": f"Vinculado à Stripe com sucesso (plano {plano.capitalize()} mantido).",
+        })
+    except Exception as exc:
+        return jsonify({"error": f"Erro ao vincular à Stripe: {exc}"}), 500
 
 
 # ── POST /api/admin/users/<id>/reativar-gratis ────────────────────────────────

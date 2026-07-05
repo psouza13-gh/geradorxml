@@ -15,7 +15,7 @@
 
 All routes require a JWT for a user with is_admin = TRUE.
 """
-import sys, os, re, io, csv
+import sys, os, re, io, csv, json
 from datetime import datetime, timezone, timedelta
 from flask import Flask, request, jsonify, Response
 
@@ -998,3 +998,63 @@ def meta_capi_send_test():
                         "details": result.get("body") or result.get("skipped")}), 502
     except Exception as exc:
         return jsonify({"error": f"Erro ao enviar evento de teste: {exc}"}), 500
+
+
+# ── Integrations: códigos de rastreamento (GTM, Clarity, etc.) ────────────────
+# GET   /api/admin/integrations/site  — códigos atuais de <head> e <body>
+# POST  /api/admin/integrations/site  — salvar códigos
+#
+# Os códigos são injetados nas páginas PÚBLICAS (landing, login, app...) pelo
+# loader public/js/integrations.js, que consome GET /api/public/integrations.
+# Só o admin escreve aqui; os snippets não são segredos (ficam visíveis no
+# HTML de qualquer visitante, como todo GTM/Clarity/Pixel).
+
+_SITE_INTEGRATIONS_KEY = "site_integrations"
+_SITE_CODE_MAX_LEN     = 20000  # por campo — GTM/Clarity têm ~300-500 chars
+
+
+@app.route("/api/admin/integrations/site", methods=["GET"])
+def site_integrations_get():
+    if not _require_admin():
+        return jsonify({"error": "Acesso restrito ao administrador."}), 403
+    try:
+        row = execute("SELECT value, updated_at FROM app_settings WHERE key = %s",
+                      (_SITE_INTEGRATIONS_KEY,), fetch="one")
+        value = {}
+        if row and row.get("value"):
+            value = row["value"]
+            if isinstance(value, str):
+                value = json.loads(value)
+        return jsonify({
+            "head_code":  value.get("head_code") or "",
+            "body_code":  value.get("body_code") or "",
+            "updated_at": row["updated_at"].isoformat() if row and row.get("updated_at") else None,
+        })
+    except Exception as exc:
+        return jsonify({"error": f"Erro ao carregar integrações: {exc}"}), 500
+
+
+@app.route("/api/admin/integrations/site", methods=["POST"])
+def site_integrations_save():
+    if not _require_admin():
+        return jsonify({"error": "Acesso restrito ao administrador."}), 403
+
+    data = request.get_json(silent=True) or {}
+    head_code = str(data.get("head_code") or "")
+    body_code = str(data.get("body_code") or "")
+
+    if len(head_code) > _SITE_CODE_MAX_LEN or len(body_code) > _SITE_CODE_MAX_LEN:
+        return jsonify({"error": f"Código muito grande (máx. {_SITE_CODE_MAX_LEN} caracteres por campo)."}), 400
+
+    try:
+        execute(
+            """
+            INSERT INTO app_settings (key, value, updated_at)
+            VALUES (%s, %s::jsonb, NOW())
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+            """,
+            (_SITE_INTEGRATIONS_KEY, json.dumps({"head_code": head_code, "body_code": body_code})),
+        )
+        return jsonify({"ok": True, "head_code": head_code, "body_code": body_code})
+    except Exception as exc:
+        return jsonify({"error": f"Erro ao salvar integrações: {exc}"}), 500

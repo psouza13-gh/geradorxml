@@ -44,6 +44,7 @@
     <button id="nav-usuarios" onclick="showAdminTab('usuarios')" class="nav-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 text-gray-400 hover:bg-gray-800/60 hover:text-gray-200">👥 Usuários</button>
     <button id="nav-email-marketing" onclick="showAdminTab('email-marketing')" class="nav-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 text-gray-400 hover:bg-gray-800/60 hover:text-gray-200">📧 E-mail Marketing</button>
     <button id="nav-trafego" onclick="showAdminTab('trafego')" class="nav-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 text-gray-400 hover:bg-gray-800/60 hover:text-gray-200">📈 Tráfego &amp; Pixel</button>
+    <button id="nav-integracoes" onclick="showAdminTab('integracoes')" class="nav-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 text-gray-400 hover:bg-gray-800/60 hover:text-gray-200">🔌 Integrações</button>
     <button id="nav-logs" onclick="showAdminTab('logs')" class="nav-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 text-gray-400 hover:bg-gray-800/60 hover:text-gray-200">🪵 Logs</button>
   </aside>
 
@@ -314,6 +315,79 @@
 
   </div><!-- /tab-trafego -->
 
+  <div id="tab-integracoes" class="hidden space-y-6">
+
+  <!-- ── INTEGRAÇÕES: CÓDIGOS DE RASTREAMENTO ──────────────── -->
+  <section class="bg-gray-900 border border-gray-800 rounded-2xl p-4 space-y-4">
+    <div>
+      <h2 class="text-sm font-semibold text-white">Códigos de rastreamento</h2>
+      <p class="text-xs text-gray-500 mt-1">
+        Cole aqui os snippets de ferramentas como <strong class="text-gray-300">Google Tag Manager</strong>,
+        <strong class="text-gray-300">Microsoft Clarity</strong>, Google Analytics etc.
+        Eles são injetados automaticamente em <strong class="text-gray-300">todas as páginas públicas</strong>
+        (landing, login, cadastro e app) — sem precisar de novo deploy.
+      </p>
+    </div>
+
+    <div id="int-err" class="hidden text-xs text-red-300 bg-red-900/30 border border-red-800 rounded-lg px-3 py-2"></div>
+    <div id="int-ok"  class="hidden text-xs text-green-300 bg-green-900/30 border border-green-800 rounded-lg px-3 py-2"></div>
+
+    <div>
+      <label for="int-head-code" class="block text-[11px] font-medium text-gray-400 mb-1.5">
+        Código no <code class="text-amber-400">&lt;head&gt;</code>
+        <span class="text-gray-600">— scripts de rastreamento (GTM, Clarity, GA4…)</span>
+      </label>
+      <textarea id="int-head-code" rows="8" spellcheck="false"
+        placeholder="<!-- Google Tag Manager -->&#10;<script>(function(w,d,s,l,i){...})(window,document,'script','dataLayer','GTM-XXXXXXX');</script>&#10;<!-- End Google Tag Manager -->"
+        class="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-xs font-mono text-gray-300 focus:outline-none focus:border-amber-500 resize-y"></textarea>
+    </div>
+
+    <div>
+      <label for="int-body-code" class="block text-[11px] font-medium text-gray-400 mb-1.5">
+        Código no <code class="text-amber-400">&lt;body&gt;</code>
+        <span class="text-gray-600">— ex.: &lt;noscript&gt; do GTM</span>
+      </label>
+      <textarea id="int-body-code" rows="5" spellcheck="false"
+        placeholder="<!-- Google Tag Manager (noscript) -->&#10;<noscript><iframe src=&quot;https://www.googletagmanager.com/ns.html?id=GTM-XXXXXXX&quot;...></iframe></noscript>&#10;<!-- End Google Tag Manager (noscript) -->"
+        class="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-xs font-mono text-gray-300 focus:outline-none focus:border-amber-500 resize-y"></textarea>
+    </div>
+
+    <div class="flex items-center gap-3">
+      <button id="int-save-btn" onclick="intSaveCodes()"
+        class="bg-amber-500 hover:bg-amber-400 text-gray-950 font-semibold text-sm px-4 py-2 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+        Salvar códigos
+      </button>
+      <span id="int-saving-msg" class="hidden text-xs text-gray-500">Salvando…</span>
+      <span id="int-updated-at" class="text-[11px] text-gray-600"></span>
+    </div>
+  </section>
+
+  <!-- ── GUIA RÁPIDO ─────────────────────────────────────────── -->
+  <section class="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+    <h2 class="text-sm font-semibold text-white mb-3">Guia rápido</h2>
+    <div class="grid md:grid-cols-2 gap-3 text-xs text-gray-400">
+      <div class="border border-gray-800 rounded-xl p-3 space-y-1.5">
+        <p class="font-semibold text-gray-200">🏷️ Google Tag Manager</p>
+        <p>1. Crie o contêiner em <span class="text-gray-300">tagmanager.google.com</span> e copie os 2 códigos de instalação.</p>
+        <p>2. O 1º código (<code class="text-amber-400">&lt;script&gt;</code>) vai no campo <strong class="text-gray-300">head</strong>; o 2º (<code class="text-amber-400">&lt;noscript&gt;</code>) vai no campo <strong class="text-gray-300">body</strong>.</p>
+        <p>3. Salve aqui e publique o contêiner no GTM. Valide com o modo Preview do GTM.</p>
+      </div>
+      <div class="border border-gray-800 rounded-xl p-3 space-y-1.5">
+        <p class="font-semibold text-gray-200">👁️ Microsoft Clarity</p>
+        <p>1. Crie o projeto em <span class="text-gray-300">clarity.microsoft.com</span> com o site <span class="text-gray-300">geradorxml.hubfiscal.app.br</span>.</p>
+        <p>2. Em Settings → Setup → "Install tracking code manually", copie o snippet.</p>
+        <p>3. Cole no campo <strong class="text-gray-300">head</strong> (junto com o GTM, se houver — pode empilhar vários códigos no mesmo campo).</p>
+        <p class="text-gray-600">Dica: se usar GTM, também dá para instalar o Clarity como tag dentro do próprio GTM — aí só o código do GTM precisa estar aqui.</p>
+      </div>
+    </div>
+    <p class="text-[11px] text-gray-600 mt-3">
+      ⚠️ Os códigos rodam no navegador de todos os visitantes. Cole apenas snippets oficiais das ferramentas —
+      um código com erro pode afetar as páginas públicas. As alterações valem em até ~5 min (cache da CDN).
+    </p>
+  </section>
+
+  </div><!-- /tab-integracoes -->
+
   </main>
 </div><!-- /content -->
 
@@ -501,7 +575,7 @@ function fmtNum(n) {
 })();
 
 // ── Sidebar tabs ─────────────────────────────────────────────────────────────
-const ADMIN_TABS = ['visao-geral', 'usuarios', 'email-marketing', 'trafego', 'logs'];
+const ADMIN_TABS = ['visao-geral', 'usuarios', 'email-marketing', 'trafego', 'integracoes', 'logs'];
 function showAdminTab(name) {
   ADMIN_TABS.forEach(t => {
     $('tab-' + t).classList.toggle('hidden', t !== name);
@@ -511,6 +585,58 @@ function showAdminTab(name) {
     if (nav) nav.classList.toggle('text-gray-400', t !== name);
   });
   if (name === 'email-marketing') _loadEngagementStatus();
+  if (name === 'integracoes') _loadSiteIntegrations();
+}
+
+// ── Integrações: códigos de rastreamento (GTM, Clarity...) ──────────────────
+let _intLoaded = false;
+function _intShowMsg(kind, msg) {
+  const errEl = $('int-err'), okEl = $('int-ok');
+  errEl.classList.add('hidden'); okEl.classList.add('hidden');
+  if (!msg) return;
+  const el = kind === 'error' ? errEl : okEl;
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+async function _loadSiteIntegrations() {
+  if (_intLoaded) return; // não sobrescrever edições não salvas ao trocar de aba
+  try {
+    const resp = await fetch('/api/admin/integrations/site', { headers: authHdrs() });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    $('int-head-code').value = data.head_code || '';
+    $('int-body-code').value = data.body_code || '';
+    $('int-updated-at').textContent = data.updated_at
+      ? 'Última alteração: ' + fmtDateTime(data.updated_at) : '';
+    _intLoaded = true;
+  } catch (e) {}
+}
+
+async function intSaveCodes() {
+  _intShowMsg(null);
+  const btn = $('int-save-btn');
+  btn.disabled = true;
+  $('int-saving-msg').classList.remove('hidden');
+  try {
+    const resp = await fetch('/api/admin/integrations/site', {
+      method: 'POST',
+      headers: { ...authHdrs(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        head_code: $('int-head-code').value,
+        body_code: $('int-body-code').value,
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { _intShowMsg('error', data.error || 'Erro ao salvar.'); return; }
+    $('int-updated-at').textContent = 'Última alteração: ' + fmtDateTime(new Date().toISOString());
+    _intShowMsg('ok', 'Códigos salvos. Entram no ar em até ~5 min (cache da CDN).');
+  } catch (e) {
+    _intShowMsg('error', 'Erro de conexão. Tente novamente.');
+  } finally {
+    btn.disabled = false;
+    $('int-saving-msg').classList.add('hidden');
+  }
 }
 
 async function _loadAll() {

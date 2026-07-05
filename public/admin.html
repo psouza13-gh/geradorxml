@@ -36,7 +36,20 @@
   Verificando acesso…
 </div>
 
-<main id="content" class="hidden max-w-7xl mx-auto p-6 space-y-6">
+<div id="content" class="hidden max-w-7xl mx-auto flex gap-6 p-6">
+
+  <!-- ── SIDEBAR ────────────────────────────────────────── -->
+  <aside class="w-52 shrink-0 space-y-1">
+    <button id="nav-visao-geral" onclick="showAdminTab('visao-geral')" class="nav-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 text-gray-400 hover:bg-gray-800/60 hover:text-gray-200">📊 Visão Geral</button>
+    <button id="nav-usuarios" onclick="showAdminTab('usuarios')" class="nav-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 text-gray-400 hover:bg-gray-800/60 hover:text-gray-200">👥 Usuários</button>
+    <button id="nav-email-marketing" onclick="showAdminTab('email-marketing')" class="nav-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 text-gray-400 hover:bg-gray-800/60 hover:text-gray-200">📧 E-mail Marketing</button>
+    <button id="nav-trafego" onclick="showAdminTab('trafego')" class="nav-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 text-gray-400 hover:bg-gray-800/60 hover:text-gray-200">📈 Tráfego &amp; Pixel</button>
+    <button id="nav-logs" onclick="showAdminTab('logs')" class="nav-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 text-gray-400 hover:bg-gray-800/60 hover:text-gray-200">🪵 Logs</button>
+  </aside>
+
+  <main class="flex-1 min-w-0 space-y-6">
+
+  <div id="tab-visao-geral" class="space-y-6">
 
   <!-- ── SUMMARY CARDS ─────────────────────────────────── -->
   <section class="space-y-5">
@@ -65,6 +78,10 @@
     <h2 class="text-sm font-semibold text-white mb-3">Distribuição por plano</h2>
     <div id="plan-breakdown" class="space-y-2 text-sm"></div>
   </section>
+
+  </div><!-- /tab-visao-geral -->
+
+  <div id="tab-usuarios" class="hidden space-y-6">
 
   <!-- ── USERS TABLE ───────────────────────────────────── -->
   <section class="bg-gray-900 border border-gray-800 rounded-2xl p-4">
@@ -135,6 +152,54 @@
     <div id="u-pager" class="flex items-center justify-between mt-3 text-xs text-gray-500"></div>
   </section>
 
+  </div><!-- /tab-usuarios -->
+
+  <div id="tab-email-marketing" class="hidden space-y-6">
+
+  <!-- ── E-MAIL MARKETING (reengajamento automático) ───── -->
+  <section class="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+    <h2 class="text-sm font-semibold text-white mb-2">Sequência de reengajamento por e-mail</h2>
+    <p class="text-xs text-gray-500 mb-4">
+      Todo dia (~10h, horário de Brasília), um job automático (Vercel Cron) verifica quem se cadastrou no plano
+      grátis e ainda não fez nenhum download com sucesso, e envia o e-mail certo conforme o tempo desde o
+      cadastro. A sequência para sozinha assim que a pessoa ativa (faz o 1º download).
+    </p>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+      <div class="bg-gray-800/50 border border-gray-700 rounded-lg p-3">
+        <div class="text-xs font-semibold text-gray-200 mb-1">📩 Boas-vindas</div>
+        <div class="text-[11px] text-gray-500">1–2 dias após o cadastro</div>
+        <div class="text-lg font-bold text-emerald-400 mt-1" id="eng-count-welcome">—</div>
+        <div class="text-[11px] text-gray-500">receberiam hoje</div>
+      </div>
+      <div class="bg-gray-800/50 border border-gray-700 rounded-lg p-3">
+        <div class="text-xs font-semibold text-gray-200 mb-1">💡 Reforço</div>
+        <div class="text-[11px] text-gray-500">3–5 dias após o cadastro</div>
+        <div class="text-lg font-bold text-emerald-400 mt-1" id="eng-count-reminder">—</div>
+        <div class="text-[11px] text-gray-500">receberiam hoje</div>
+      </div>
+      <div class="bg-gray-800/50 border border-gray-700 rounded-lg p-3">
+        <div class="text-xs font-semibold text-gray-200 mb-1">👋 Última chamada</div>
+        <div class="text-[11px] text-gray-500">7–10 dias após o cadastro</div>
+        <div class="text-lg font-bold text-emerald-400 mt-1" id="eng-count-winback">—</div>
+        <div class="text-[11px] text-gray-500">receberiam hoje</div>
+      </div>
+    </div>
+    <button onclick="_loadEngagementStatus()" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg px-3 py-1.5 text-xs font-medium transition">Verificar agora</button>
+    <div id="eng-sent-summary" class="text-xs text-gray-500 mt-3"></div>
+  </section>
+
+  <section class="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+    <h2 class="text-sm font-semibold text-white mb-2">Envio manual para usuários selecionados</h2>
+    <p class="text-xs text-gray-500">
+      Vá até a aba <button onclick="showAdminTab('usuarios')" class="text-emerald-400 hover:underline">Usuários</button>,
+      marque quem quiser reengajar e use o bloco "✉️ Reengajar por e-mail" no topo da tabela.
+    </p>
+  </section>
+
+  </div><!-- /tab-email-marketing -->
+
+  <div id="tab-logs" class="hidden space-y-6">
+
   <!-- ── FALHAS DE DOWNLOAD (diagnóstico da taxa de erro) ── -->
   <section class="bg-gray-900 border border-gray-800 rounded-2xl p-4">
     <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
@@ -168,6 +233,10 @@
     <div id="webhook-errors-empty" class="hidden text-center text-gray-500 text-xs py-8">Nenhum erro registrado. 🎉</div>
     <div id="webhook-errors-list" class="space-y-2"></div>
   </section>
+
+  </div><!-- /tab-logs -->
+
+  <div id="tab-trafego" class="hidden space-y-6">
 
   <!-- ── INTEGRAÇÃO: META CONVERSIONS API ──────────────── -->
   <section class="bg-gray-900 border border-gray-800 rounded-2xl p-4">
@@ -243,7 +312,10 @@
     </div>
   </section>
 
-</main>
+  </div><!-- /tab-trafego -->
+
+  </main>
+</div><!-- /content -->
 
 <!-- ══════════════════════════════════════════════════════
      MODAL: GERENCIAR USUÁRIO
@@ -421,11 +493,25 @@ function fmtNum(n) {
     }
     $('guard-msg').classList.add('hidden');
     $('content').classList.remove('hidden');
+    showAdminTab('visao-geral');
     _loadAll();
   } catch (e) {
     logout();
   }
 })();
+
+// ── Sidebar tabs ─────────────────────────────────────────────────────────────
+const ADMIN_TABS = ['visao-geral', 'usuarios', 'email-marketing', 'trafego', 'logs'];
+function showAdminTab(name) {
+  ADMIN_TABS.forEach(t => {
+    $('tab-' + t).classList.toggle('hidden', t !== name);
+    const nav = $('nav-' + t);
+    if (nav) nav.classList.toggle('bg-gray-800', t === name);
+    if (nav) nav.classList.toggle('text-white', t === name);
+    if (nav) nav.classList.toggle('text-gray-400', t !== name);
+  });
+  if (name === 'email-marketing') _loadEngagementStatus();
+}
 
 async function _loadAll() {
   await Promise.all([_loadStats(), _loadUsers(), _loadMetaIntegration()]);
@@ -788,6 +874,22 @@ async function _loadWebhookErrors() {
   } catch (e) {
     list.innerHTML = '<p class="text-xs text-red-400">Erro de conexão. Tente novamente.</p>';
   }
+}
+
+// ── E-mail marketing (status do reengajamento automático) ───────────────────
+async function _loadEngagementStatus() {
+  try {
+    const resp = await fetch('/api/admin/engagement-status', { headers: authHdrs() });
+    const data = await resp.json();
+    if (!resp.ok) return;
+    const c = data.cohorts || {};
+    $('eng-count-welcome').textContent  = (c.welcome  && c.welcome.receberiam)  || 0;
+    $('eng-count-reminder').textContent = (c.reminder && c.reminder.receberiam) || 0;
+    $('eng-count-winback').textContent  = (c.winback  && c.winback.receberiam)  || 0;
+    const e = data.enviados || {};
+    $('eng-sent-summary').textContent =
+      `Já enviados (histórico total): boas-vindas ${e.welcome||0} · reforço ${e.reminder||0} · última chamada ${e.winback||0}`;
+  } catch (e) {}
 }
 
 // ── Manage modal ───────────────────────────────────────────────────────────

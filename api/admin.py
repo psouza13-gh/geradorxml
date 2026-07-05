@@ -876,6 +876,54 @@ def webhook_errors_view():
         return jsonify({"erros": [], "info": str(exc)})
 
 
+# ── GET /api/admin/engagement-status ───────────────────────────────────────────
+# Status (somente leitura, autenticado por JWT admin) da sequência automática de
+# reengajamento por e-mail — quantos usuários receberiam cada e-mail hoje, e
+# quantos já foram enviados no histórico. Reaproveita o mesmo critério de
+# api/cron_engagement.py, mas sem exigir o CRON_SECRET (esse endpoint nunca
+# envia nada, só consulta).
+
+_ENG_TIERS = [("welcome", 1, 2), ("reminder", 3, 5), ("winback", 7, 10)]
+
+
+@app.route("/api/admin/engagement-status", methods=["GET"])
+def engagement_status():
+    if not _require_admin():
+        return jsonify({"error": "Acesso restrito ao administrador."}), 403
+
+    cohorts = {}
+    try:
+        for tipo, dia_min, dia_max in _ENG_TIERS:
+            where = (
+                "u.plano = 'trial' AND u.status = 'ativo' AND u.is_admin = FALSE "
+                "AND u.created_at <= NOW() - (%s * INTERVAL '1 day') "
+                "AND u.created_at >  NOW() - (%s * INTERVAL '1 day') "
+                "AND NOT EXISTS (SELECT 1 FROM download_logs d WHERE d.user_id = u.id AND d.sucesso = TRUE) "
+                "AND NOT EXISTS (SELECT 1 FROM engagement_messages e WHERE e.user_id = u.id AND e.tipo = %s)"
+            )
+            total = execute(
+                f"SELECT COUNT(*) AS n FROM users u WHERE {where}",
+                (dia_min, dia_max, tipo), fetch="one",
+            )
+            amostra = execute(
+                f"SELECT email FROM users u WHERE {where} ORDER BY u.created_at ASC LIMIT 10",
+                (dia_min, dia_max, tipo), fetch="all",
+            )
+            cohorts[tipo] = {
+                "receberiam": (total["n"] if total else 0),
+                "amostra": [r["email"] for r in (amostra or [])],
+            }
+
+        enviados_rows = execute(
+            "SELECT tipo, COUNT(*) AS n FROM engagement_messages GROUP BY tipo", fetch="all"
+        )
+        enviados = {r["tipo"]: r["n"] for r in (enviados_rows or [])}
+        return jsonify({"cohorts": cohorts, "enviados": enviados})
+    except Exception as exc:
+        # Tabelas podem ainda não existir se o cron nunca rodou.
+        return jsonify({"cohorts": {}, "enviados": {}, "info": str(exc)})
+
+
 # ── Integrations: Meta Conversions API ────────────────────────────────────────
 # GET   /api/admin/integrations/meta       — current config + token status
 # POST  /api/admin/integrations/meta       — update pixel id / toggles / test code

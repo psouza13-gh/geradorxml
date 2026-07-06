@@ -3,9 +3,10 @@
 
   POST /api/auth/register  — create account, returns JWT
   POST /api/auth/login     — verify credentials, returns JWT
+  POST /api/auth/google    — sign in / sign up with a Google ID token, returns JWT
   GET  /api/auth/me        — return current user info (requires JWT)
 """
-import sys, os, re
+import sys, os, re, secrets
 from flask import Flask, request, jsonify
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -171,6 +172,90 @@ def login():
 
         token = create_token(str(user["id"]), email)
         return jsonify({"token": token, "user": _user_json(user, with_uso=True)})
+
+    except Exception:
+        return jsonify({"error": "Erro interno. Tente novamente."}), 500
+
+
+# ── POST /api/auth/google ─────────────────────────────────────────────────────
+# Login/cadastro com conta Google (Google Identity Services).
+#
+# O navegador envia a "credential" (um JWT assinado pelo Google) obtida pelo
+# botão oficial "Entrar com Google". Aqui a assinatura é verificada com a
+# biblioteca oficial google-auth (issuer, audience = nosso Client ID, expiração)
+# — nunca confiamos no e-mail sem validar o token.
+#
+# Fluxo aditivo: NÃO altera o login/registro por senha.
+#   • e-mail já cadastrado  → login normal (Google comprova posse do e-mail)
+#   • e-mail novo           → cria conta trial com senha aleatória inutilizável;
+#                             a pessoa pode definir senha real depois pelo
+#                             "Esqueci minha senha" (mesmo fluxo já existente).
+#
+# GOOGLE_CLIENT_ID não é segredo (aparece no HTML de qualquer site com o botão);
+# sem a env var configurada o endpoint responde 503 e o botão nem é exibido.
+
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+
+
+@app.route("/api/auth/google", methods=["POST"])
+def google_auth():
+    if not GOOGLE_CLIENT_ID:
+        return jsonify({"error": "Login com Google não está habilitado."}), 503
+    if limited(f"google:{_client_ip()}", limit=12, window=300):
+        return jsonify({"error": "Muitas tentativas. Aguarde alguns minutos e tente novamente."}), 429
+
+    data       = request.get_json(silent=True) or {}
+    credential = data.get("credential") or ""
+    if not credential or not isinstance(credential, str) or len(credential) > 4096:
+        return jsonify({"error": "Credencial do Google ausente ou inválida."}), 400
+
+    try:
+        from google.oauth2 import id_token as google_id_token
+        from google.auth.transport import requests as google_requests
+        info = google_id_token.verify_oauth2_token(
+            credential, google_requests.Request(), GOOGLE_CLIENT_ID,
+            clock_skew_in_seconds=10,
+        )
+    except ImportError:
+        return jsonify({"error": "Login com Google indisponível no momento."}), 503
+    except Exception:
+        return jsonify({"error": "Não foi possível validar sua conta Google. Tente novamente."}), 401
+
+    email = (info.get("email") or "").strip().lower()
+    if not email or not info.get("email_verified"):
+        return jsonify({"error": "Sua conta Google não possui e-mail verificado."}), 401
+    nome = (info.get("name") or email.split("@")[0]).strip()[:120]
+
+    try:
+        user   = get_user_by_email(email)
+        is_new = user is None
+        if is_new:
+            # Senha aleatória de 43 chars: impossível de adivinhar, então o login
+            # por senha simplesmente não funciona até a pessoa definir uma via
+            # "Esqueci minha senha". Nenhuma mudança de schema necessária.
+            user = create_user(nome, email, secrets.token_urlsafe(32))
+            if not user:
+                return jsonify({"error": "Erro ao criar conta. Tente novamente."}), 500
+
+        token = create_token(str(user["id"]), email)
+
+        if is_new:
+            # Mesmo fire-and-forget do /register (Meta CAPI) — sem telefone,
+            # pois o Google não fornece; nunca bloqueia a resposta.
+            try:
+                user_id = str(user["id"])
+                src_url = request.headers.get("Referer") or f"https://{request.host}/register"
+                ip      = _client_ip()
+                ua      = request.headers.get("User-Agent")
+                send_lead(user_id=user_id, email=email,
+                          event_source_url=src_url, client_ip=ip, client_user_agent=ua)
+                send_trial_start(user_id=user_id, email=email,
+                                 event_source_url=src_url, client_ip=ip, client_user_agent=ua)
+            except Exception:
+                pass
+
+        return jsonify({"token": token, "user": _user_json(user, with_uso=not is_new),
+                        "is_new": is_new}), (201 if is_new else 200)
 
     except Exception:
         return jsonify({"error": "Erro interno. Tente novamente."}), 500

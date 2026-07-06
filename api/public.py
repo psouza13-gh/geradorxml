@@ -68,3 +68,16 @@ def site_integrations():
     resp = jsonify({"head": head, "body": body})
     resp.headers["Cache-Control"] = "public, max-age=60, s-maxage=300, stale-while-revalidate=600"
     return resp
+
+
+@app.route("/api/public/google-client-id", methods=["GET"])
+def google_client_id():
+    """Client ID do OAuth do Google para o botão "Entrar com Google".
+
+    Não é segredo — todo site com o botão expõe o Client ID no HTML. Se a env
+    var não estiver configurada, retorna vazio e as páginas simplesmente não
+    exibem o botão (deploy seguro antes de criar as credenciais no Google).
+    """
+    resp = jsonify({"client_id": os.environ.get("GOOGLE_CLIENT_ID", "").strip()})
+    resp.headers["Cache-Control"] = "public, max-age=300, s-maxage=600"
+    return resp

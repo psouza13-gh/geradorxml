@@ -83,6 +83,9 @@
     .btn-ghost:hover{background:#0a1628;color:#e2e8f0}
     .spin{animation:spin .8s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
+
+    .divider{display:flex;align-items:center;gap:.75rem;margin:1.25rem 0;color:#475569;font-size:.75rem}
+    .divider::before,.divider::after{content:'';flex:1;height:1px;background:#1e3a5f}
   </style>
 </head>
 <body>
@@ -111,6 +114,13 @@
     </p>
     <button id="sb-continue" class="btn" type="button">Ir para o painel →</button>
     <button id="sb-logout" class="btn btn-ghost" type="button">Sair e criar nova conta</button>
+  </div>
+
+  <!-- Botão "Continuar com o Google" — só aparece se GOOGLE_CLIENT_ID estiver
+       configurado no servidor (ver /js/google-signin.js). -->
+  <div id="google-wrap" style="display:none">
+    <div id="google-btn" style="display:flex;justify-content:center"></div>
+    <div class="divider"><span>ou cadastre-se com e-mail</span></div>
   </div>
 
   <form id="form">
@@ -288,5 +298,6 @@ form.addEventListener('submit', async e => {
   }
 });
 </script>
+<script src="/js/google-signin.js"></script>
 </body>
 </html>

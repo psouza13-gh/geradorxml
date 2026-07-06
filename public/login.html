@@ -75,6 +75,9 @@
     .btn-ghost:hover{background:#0a1628;color:#e2e8f0}
     .spin{animation:spin .8s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
+
+    .divider{display:flex;align-items:center;gap:.75rem;margin:1.25rem 0;color:#475569;font-size:.75rem}
+    .divider::before,.divider::after{content:'';flex:1;height:1px;background:#1e3a5f}
   </style>
 </head>
 <body>
@@ -121,6 +124,13 @@
       <span id="btn-txt">Entrar</span>
     </button>
   </form>
+
+  <!-- Botão "Entrar com Google" — só aparece se GOOGLE_CLIENT_ID estiver
+       configurado no servidor (ver /js/google-signin.js). -->
+  <div id="google-wrap" style="display:none">
+    <div class="divider"><span>ou</span></div>
+    <div id="google-btn" style="display:flex;justify-content:center"></div>
+  </div>
 
   <p class="footer-txt">
     <a href="/forgot-password">Esqueci minha senha</a>
@@ -214,5 +224,6 @@ form.addEventListener('submit', async e => {
   }
 });
 </script>
+<script src="/js/google-signin.js"></script>
 </body>
 </html>

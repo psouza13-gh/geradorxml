@@ -194,7 +194,41 @@
     <p class="text-xs text-gray-500">
       Vá até a aba <button onclick="showAdminTab('usuarios')" class="text-emerald-400 hover:underline">Usuários</button>,
       marque quem quiser reengajar e use o bloco "✉️ Reengajar por e-mail" no topo da tabela.
+      Confira antes na tabela abaixo quem já recebeu cada e-mail.
     </p>
+  </section>
+
+  <!-- ── QUEM JÁ RECEBEU CADA E-MAIL ───────────────────── -->
+  <section class="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+    <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
+      <div>
+        <h2 class="text-sm font-semibold text-white">Quem já recebeu cada e-mail</h2>
+        <p class="text-xs text-gray-500 mt-1">
+          Histórico por usuário — soma os envios automáticos (cron) e os manuais. Use para não repetir um e-mail já enviado.
+        </p>
+      </div>
+      <div class="flex items-center gap-2">
+        <input id="eng-hist-search" type="text" placeholder="Buscar nome ou e-mail…" oninput="_renderEngagementHistory()"
+          class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs w-52 focus:outline-none focus:border-emerald-500"/>
+        <button onclick="_loadEngagementHistory()" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg px-3 py-1.5 text-xs font-medium transition">Atualizar</button>
+      </div>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-xs">
+        <thead>
+          <tr class="text-gray-500 text-left border-b border-gray-800">
+            <th class="py-2 pr-3 font-medium">Usuário</th>
+            <th class="py-2 pr-3 font-medium">Cadastro</th>
+            <th class="py-2 pr-3 font-medium text-center">📩 Boas-vindas</th>
+            <th class="py-2 pr-3 font-medium text-center">💡 Reforço</th>
+            <th class="py-2 pr-3 font-medium text-center">👋 Última chamada</th>
+            <th class="py-2 pr-3 font-medium text-center">Ativou?</th>
+          </tr>
+        </thead>
+        <tbody id="eng-hist-tbody"></tbody>
+      </table>
+      <div id="eng-hist-empty" class="hidden text-center text-gray-500 text-xs py-8">Nenhum usuário ainda.</div>
+    </div>
   </section>
 
   </div><!-- /tab-email-marketing -->
@@ -584,7 +618,7 @@ function showAdminTab(name) {
     if (nav) nav.classList.toggle('text-white', t === name);
     if (nav) nav.classList.toggle('text-gray-400', t !== name);
   });
-  if (name === 'email-marketing') _loadEngagementStatus();
+  if (name === 'email-marketing') { _loadEngagementStatus(); _loadEngagementHistory(); }
   if (name === 'integracoes') _loadSiteIntegrations();
 }
 
@@ -1016,6 +1050,45 @@ async function _loadEngagementStatus() {
     $('eng-sent-summary').textContent =
       `Já enviados (histórico total): boas-vindas ${e.welcome||0} · reforço ${e.reminder||0} · última chamada ${e.winback||0}`;
   } catch (e) {}
+}
+
+// ── E-mail marketing (tabela: quem já recebeu cada e-mail) ──────────────────
+let _engHistCache = [];
+async function _loadEngagementHistory() {
+  const tb = $('eng-hist-tbody');
+  tb.innerHTML = '<tr><td colspan="6" class="text-center text-gray-500 py-6">Carregando…</td></tr>';
+  try {
+    const resp = await fetch('/api/admin/engagement-history', { headers: authHdrs() });
+    const data = await resp.json();
+    if (!resp.ok) { tb.innerHTML = '<tr><td colspan="6" class="text-center text-red-400 py-6">Erro ao carregar.</td></tr>'; return; }
+    _engHistCache = data.usuarios || [];
+    _renderEngagementHistory();
+  } catch (e) {
+    tb.innerHTML = '<tr><td colspan="6" class="text-center text-red-400 py-6">Erro de conexão.</td></tr>';
+  }
+}
+function _engCell(iso) {
+  return iso
+    ? `<span class="text-emerald-400" title="${fmtDateTime(iso)}">✓ ${fmtDate(iso)}</span>`
+    : '<span class="text-gray-600">—</span>';
+}
+function _renderEngagementHistory() {
+  const q = ($('eng-hist-search').value || '').trim().toLowerCase();
+  const list = _engHistCache.filter(u =>
+    !q || (u.nome || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q));
+  $('eng-hist-empty').classList.toggle('hidden', list.length > 0);
+  $('eng-hist-tbody').innerHTML = list.map(u => `
+    <tr class="border-b border-gray-800/60">
+      <td class="py-2.5 pr-3">
+        <div class="text-gray-200 font-medium">${esc(u.nome) || '—'}</div>
+        <div class="text-gray-500">${esc(u.email)}</div>
+      </td>
+      <td class="py-2.5 pr-3 text-gray-400">${fmtDate(u.criado_em)}</td>
+      <td class="py-2.5 pr-3 text-center">${_engCell(u.welcome_at)}</td>
+      <td class="py-2.5 pr-3 text-center">${_engCell(u.reminder_at)}</td>
+      <td class="py-2.5 pr-3 text-center">${_engCell(u.winback_at)}</td>
+      <td class="py-2.5 pr-3 text-center">${u.ativou ? '<span class="text-emerald-400">✓ baixou</span>' : '<span class="text-gray-500">aguardando</span>'}</td>
+    </tr>`).join('');
 }
 
 // ── Manage modal ───────────────────────────────────────────────────────────

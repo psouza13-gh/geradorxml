@@ -924,6 +924,77 @@ def engagement_status():
         return jsonify({"cohorts": {}, "enviados": {}, "info": str(exc)})
 
 
+# ── GET /api/admin/engagement-history ──────────────────────────────────────────
+# Tabela "quem já recebeu cada e-mail": histórico por usuário dos 3 e-mails da
+# sequência (welcome / reminder / winback), somando os envios automáticos (cron)
+# e os manuais (POST /api/admin/reengajar) — ambos gravam em engagement_messages.
+# Evita o admin reenviar sem querer um e-mail que a pessoa já recebeu.
+
+@app.route("/api/admin/engagement-history", methods=["GET"])
+def engagement_history():
+    if not _require_admin():
+        return jsonify({"error": "Acesso restrito ao administrador."}), 403
+
+    # Garante a tabela (mesmo padrão do cron / reengajar) para não falhar num
+    # estado novo onde nenhum e-mail foi enviado ainda.
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS engagement_messages (
+                id BIGSERIAL PRIMARY KEY,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                tipo TEXT NOT NULL,
+                sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (user_id, tipo)
+            )
+            """
+        )
+    except Exception:
+        pass
+
+    try:
+        rows = execute(
+            """
+            SELECT u.id, u.nome, u.email, u.created_at, u.plano, u.status,
+                   MAX(CASE WHEN e.tipo = 'welcome'  THEN e.sent_at END) AS welcome_at,
+                   MAX(CASE WHEN e.tipo = 'reminder' THEN e.sent_at END) AS reminder_at,
+                   MAX(CASE WHEN e.tipo = 'winback'  THEN e.sent_at END) AS winback_at,
+                   EXISTS (SELECT 1 FROM download_logs d
+                            WHERE d.user_id = u.id AND d.sucesso = TRUE) AS ativou
+              FROM users u
+              LEFT JOIN engagement_messages e ON e.user_id = u.id
+             WHERE u.is_admin = FALSE
+             GROUP BY u.id, u.nome, u.email, u.created_at, u.plano, u.status
+             ORDER BY u.created_at DESC
+             LIMIT 500
+            """,
+            fetch="all",
+        )
+
+        def _iso(v):
+            return v.isoformat() if v else None
+
+        return jsonify({
+            "usuarios": [
+                {
+                    "id":          str(r["id"]),
+                    "nome":        r["nome"],
+                    "email":       r["email"],
+                    "criado_em":   _iso(r["created_at"]),
+                    "plano":       r["plano"],
+                    "status":      r["status"],
+                    "welcome_at":  _iso(r["welcome_at"]),
+                    "reminder_at": _iso(r["reminder_at"]),
+                    "winback_at":  _iso(r["winback_at"]),
+                    "ativou":      bool(r["ativou"]),
+                }
+                for r in (rows or [])
+            ]
+        })
+    except Exception as exc:
+        return jsonify({"usuarios": [], "info": str(exc)})
+
+
 # ── Integrations: Meta Conversions API ────────────────────────────────────────
 # GET   /api/admin/integrations/meta       — current config + token status
 # POST  /api/admin/integrations/meta       — update pixel id / toggles / test code

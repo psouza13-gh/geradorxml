@@ -20,7 +20,7 @@ from app.services.auth_service import (
     create_password_reset_code, verify_and_consume_reset_code,
 )
 from app.services.validators import validate_cpf, validate_telefone, format_cpf
-from app.services.email_service import send_password_reset_code
+from app.services.email_service import send_password_reset_code, send_signup_welcome
 from app.services.meta_capi_service import (
     track_lead as send_lead,
     track_trial_start as send_trial_start,
@@ -128,6 +128,14 @@ def register():
             return jsonify({"error": "Erro ao criar conta. Tente novamente."}), 500
 
         token = create_token(str(user["id"]), email)
+
+        # Fire-and-forget: e-mail de boas-vindas IMEDIATO (chega na hora, cobre
+        # inclusive quem baixa no mesmo dia e não entra na régua do cron).
+        # Nunca trava/falha o cadastro por causa de e-mail.
+        try:
+            send_signup_welcome(email, nome)
+        except Exception:
+            pass
 
         # Fire-and-forget: notify Meta Ads (Conversions API) of the new lead /
         # trial start. No-ops silently if the integration isn't configured —
@@ -240,6 +248,12 @@ def google_auth():
         token = create_token(str(user["id"]), email)
 
         if is_new:
+            # E-mail de boas-vindas imediato (mesmo do /register).
+            try:
+                send_signup_welcome(email, nome)
+            except Exception:
+                pass
+
             # Mesmo fire-and-forget do /register (Meta CAPI) — sem telefone,
             # pois o Google não fornece; nunca bloqueia a resposta.
             try:

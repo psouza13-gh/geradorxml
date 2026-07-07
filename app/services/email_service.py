@@ -137,6 +137,54 @@ def _engagement_send(to: str, nome: str, subject: str, corpo_html: str, corpo_te
     return send_email(to, subject, html, text)
 
 
+def send_signup_welcome(to: str, nome: str) -> bool:
+    """Enviado IMEDIATAMENTE no cadastro (dentro de /api/auth/register e do
+    login via Google para contas novas). Diferente do welcome da régua (que sai
+    pelo cron 1–2 dias depois e só para quem não baixou), este chega na hora —
+    cobrindo inclusive quem se cadastra e baixa no mesmo dia. Fire-and-forget:
+    o chamador nunca deixa uma falha de e-mail travar o cadastro."""
+    corpo_html = (
+        "<p>Bem-vindo(a) ao <b>GeradorXML</b>! Sua conta já está ativa, com "
+        "<b>5 CNPJs grátis, para sempre</b> — sem cartão de crédito.</p>"
+        "<p>Para baixar as NFS-e do Sistema Nacional, acesse pelo "
+        "<b>computador do escritório</b>, onde normalmente está o "
+        "<b>certificado digital A1 (.pfx)</b>. Em segundos você recebe um ZIP "
+        "com todos os XMLs + uma planilha Excel organizada por emitidas e recebidas.</p>"
+        "<p><b>Como começar:</b><br>"
+        "1. Cadastre seu 1º cliente (Nome + CNPJ).<br>"
+        "2. No computador, com o certificado A1 em mãos, escolha o período.<br>"
+        "3. Clique em baixar e pronto.</p>"
+    )
+    corpo_text = (
+        "Bem-vindo(a) ao GeradorXML! Sua conta já está ativa, com 5 CNPJs grátis, para sempre.\n\n"
+        "Para baixar as NFS-e, acesse pelo computador do escritório, onde está o certificado A1 (.pfx). "
+        "Em segundos você recebe um ZIP com os XMLs + Excel organizado.\n\n"
+        "Como começar:\n"
+        "1. Cadastre seu 1º cliente (Nome + CNPJ).\n"
+        "2. No computador, com o certificado A1, escolha o período.\n"
+        "3. Clique em baixar."
+    )
+    return _engagement_send(to, nome, "Bem-vindo(a) ao GeradorXML — sua conta está pronta 🎉", corpo_html, corpo_text)
+
+
+def send_desktop_link(to: str, nome: str) -> bool:
+    """Ativação: usuário no celular pede o link por e-mail para continuar no
+    computador do escritório (onde está o certificado A1). Reusa o mesmo layout
+    transacional; o CTA já aponta para APP_URL."""
+    corpo_html = (
+        "<p>Aqui está o link para acessar o <b>GeradorXML no computador</b> do "
+        "escritório, onde normalmente está o <b>certificado digital A1 (.pfx)</b> "
+        "necessário para baixar as NFS-e.</p>"
+        "<p>É só abrir este e-mail no computador e clicar no botão abaixo.</p>"
+    )
+    corpo_text = (
+        "Aqui está o link para acessar o GeradorXML no computador do escritório, "
+        "onde está o certificado digital A1 (.pfx) necessário para baixar as NFS-e.\n"
+        "Abra este e-mail no computador e acesse o link."
+    )
+    return _engagement_send(to, nome, "Seu link para continuar no computador — GeradorXML", corpo_html, corpo_text)
+
+
 def send_engagement_welcome(to: str, nome: str) -> bool:
     """Dia 1 — boas-vindas / como começar."""
     corpo_html = (

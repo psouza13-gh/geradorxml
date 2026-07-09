@@ -13,15 +13,13 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@700;800&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet"/>
+<!-- Design tokens (cor, tipografia, espaçamento) — fonte única em /css/tokens.css.
+     Extraídos do CSS inline; valores idênticos, nenhuma regra ou lógica mudou. -->
+<link rel="stylesheet" href="/css/tokens.css"/>
 <style>
-/* ── Variables ── */
-:root{
-  --bg:#040404;--s1:#0d0d0d;--s2:#141414;
-  --b:rgba(255,255,255,.08);--b2:rgba(255,255,255,.12);
-  --g:#22C55E;--glow:rgba(34,197,94,.3);
-  --t:#F5F5F5;--tm:rgba(245,245,245,.55);--td:rgba(245,245,245,.28);
-  --red:rgba(239,68,68,.85);--red-bg:rgba(239,68,68,.07);--red-b:rgba(239,68,68,.15)
-}
+/* ── Variables ──
+   Os tokens de cor/tipografia/espaçamento agora vivem em /css/tokens.css
+   (carregado logo acima). As regras abaixo seguem usando var(--g), var(--t)… */
 
 /* ── Reset ── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}

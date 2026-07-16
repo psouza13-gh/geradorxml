@@ -4,6 +4,10 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>Painel Admin — geradorxml</title>
+  <script>
+    window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+  </script>
+  <script defer src="/_vercel/insights/script.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -948,7 +952,7 @@ function _renderUsers(data) {
   _updateReengCount();
 }
 
-// ── Reengajamento por e-mail (seleção manual) ───────────────────────────────
+// ── Reengajamento por e-mail (seleção manual) ───────────────��───────────────
 function _toggleAllChecks(master) {
   document.querySelectorAll('.u-check').forEach(c => c.checked = master.checked);
   _updateReengCount();

@@ -279,7 +279,7 @@ def track_trial_start(*, user_id: str, email: str | None, telefone: str | None =
 def track_purchase(*, user_id: str, email: str | None, plano: str, value: float,
                     telefone: str | None = None, currency: str = "BRL",
                     event_id_suffix: str | None = None) -> dict:
-    """Fire when a paid subscription is confirmed (ASAAS payment webhook)."""
+    """Fire when a paid subscription is confirmed (Stripe payment webhook)."""
     settings = get_settings()
     if not settings["events"].get("purchase", True):
         return {"ok": False, "skipped": "event_disabled"}

@@ -4,7 +4,7 @@ Returns a ZIP containing all NFS-e XMLs + an XLSX summary.
 Certificate is never persisted — only used during the request lifecycle.
 """
 
-import sys, os, io, json, zipfile, tempfile, re
+import sys, os, io, json, csv, zipfile, tempfile, re
 import xml.etree.ElementTree as ET
 from datetime import date
 
@@ -20,6 +20,10 @@ from app.services import cert_handler as _ch
 from app.services.auth_service import verify_token
 from app.services.subscription_service import verificar_e_registrar_download
 from app.services.db import execute
+from app.services.portal_reconciliation import (
+    listar_chaves_recebidas_portal, reconciliar,
+)
+from app.services.cnpj_lookup import lookup_cnpj
 
 app = Flask(__name__)
 # Limite do corpo total da requisição (certificado ~1 MB + campos do formulário).
@@ -262,6 +266,31 @@ def build_xlsx(rows: list) -> bytes:
     return buf.read()
 
 
+# ── Relatório de notas faltantes (reconciliação com o portal) ─────────────────
+
+def _fmt_cnpj(cnpj: str) -> str:
+    c = "".join(ch for ch in str(cnpj) if ch.isdigit())
+    if len(c) == 14:
+        return f"{c[:2]}.{c[2:5]}.{c[5:8]}/{c[8:12]}-{c[12:14]}"
+    return cnpj
+
+
+def _csv_faltantes(faltantes: list) -> bytes:
+    """CSV (UTF-8 BOM, separador ';') das notas recebidas que constam no portal
+    mas não foram distribuídas via certificado. Abre direto no Excel BR."""
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";")
+    w.writerow(["Chave de Acesso", "CNPJ Prestador", "Nome Prestador",
+                "Municipio (cod. IBGE)", "Observacao"])
+    obs = ("Consta no portal nacional, mas nao foi distribuida ao tomador via "
+           "certificado (DF-e). Emitida por municipio de sistema proprio. "
+           "Baixe manualmente no portal (www.nfse.gov.br) ou solicite o XML ao prestador.")
+    for f in faltantes:
+        w.writerow([f.get("chave", ""), _fmt_cnpj(f.get("cnpj_prestador", "")),
+                    f.get("nome_prestador", ""), f.get("municipio", ""), obs])
+    return ("﻿" + buf.getvalue()).encode("utf-8")
+
+
 # ── Main endpoint ─────────────────────────────────────────────────────────────
 
 @app.route("/api/download", methods=["POST"])
@@ -388,6 +417,10 @@ def download():
                                         cnpj_contribuinte=cnpj,
                                         is_cancelada=is_cancelada))
 
+        # Conjunto de TODAS as chaves baixadas (antes do filtro de tipo), em 44
+        # dígitos — base da reconciliação com o portal (evita falso-positivo).
+        chaves_baixadas_all = {str(e[0])[:44] for e in results}
+
         # ── Apply tipo filter (after full download — never miss a note) ────
         total_baixadas = len(results)
         results, xlsx_rows = _filter_by_tipo(results, xlsx_rows, tipo_nfse)
@@ -423,6 +456,29 @@ def download():
                 f"  ZIP: {n_ativas} XML(s) incluído(s) — {n_canceladas} nota(s) cancelada(s) removida(s)."
             )
 
+        # ── Reconciliação: notas recebidas que constam no portal mas não foram
+        #    distribuídas via certificado/DF-e. Best-effort: NUNCA derruba o
+        #    download — qualquer falha é registrada e o fluxo segue normal. ──
+        notas_faltantes = []
+        if tipo_nfse in ("todas", "recebidas"):
+            try:
+                chaves_portal = listar_chaves_recebidas_portal(
+                    tmp_cert_path, password, data_ini, data_fim, log=messages.append,
+                )
+                notas_faltantes = reconciliar(
+                    chaves_portal, chaves_baixadas_all,
+                    enrich_nome=lambda c: (lookup_cnpj(c) or {}).get("nome", ""),
+                )
+                if notas_faltantes:
+                    messages.append(
+                        f"  ⚠ {len(notas_faltantes)} nota(s) recebida(s) constam no portal mas "
+                        f"não vieram pelo certificado — ver RELATORIO_NOTAS_FALTANTES.csv no ZIP."
+                    )
+                else:
+                    messages.append("  Reconciliação com o portal: nenhuma nota recebida faltante.")
+            except Exception as e:
+                messages.append(f"  Reconciliação indisponível (download não afetado): {e}")
+
         # ── Build ZIP (XMLs + XLSX) ─────────────────────────────────────────
         safe_nome   = "".join(c for c in nome if c.isalnum() or c in " _-")[:40]
         periodo     = f"{data_ini.strftime('%Y%m')}-{data_fim.strftime('%Y%m')}"
@@ -454,10 +510,17 @@ def download():
             xlsx_bytes = build_xlsx(xlsx_rows)
             zf.writestr(f"NFS-e_{cnpj}_{periodo}{tipo_suffix}.xlsx", xlsx_bytes)
 
+            # Relatório de notas faltantes (reconciliação com o portal)
+            if notas_faltantes:
+                zf.writestr("RELATORIO_NOTAS_FALTANTES.csv", _csv_faltantes(notas_faltantes))
+
         zip_buf.seek(0)
         _log_download(user_id, cnpj, True)
-        return send_file(zip_buf, mimetype="application/zip",
+        resp = send_file(zip_buf, mimetype="application/zip",
                          as_attachment=True, download_name=zip_name)
+        # Header lido pelo frontend para exibir o aviso de notas faltantes.
+        resp.headers["X-Notas-Faltantes"] = str(len(notas_faltantes))
+        return resp
 
     finally:
         if tmp_cert_path:

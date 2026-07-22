@@ -422,10 +422,11 @@ function showStatus(type, msg) {
   const el=$('status'), colors={
     info:'bg-blue-900/40 border-blue-700 text-blue-300',
     error:'bg-red-900/40 border-red-700 text-red-300',
-    success:'bg-green-900/40 border-green-700 text-green-300'
+    success:'bg-green-900/40 border-green-700 text-green-300',
+    warn:'bg-amber-900/40 border-amber-700 text-amber-200'
   };
   el.className=`rounded-xl border px-4 py-3 text-sm ${colors[type]}`;
-  el.textContent=msg;
+  el.innerHTML=msg;
   el.classList.remove('hidden');
   el.scrollIntoView({behavior:'smooth',block:'nearest'});
 }
@@ -464,6 +465,7 @@ $('form').addEventListener('submit', async e => {
       showLog(err.log);
       return;
     }
+    const faltantes = parseInt(resp.headers.get('X-Notas-Faltantes')||'0', 10) || 0;
     const blob = await resp.blob();
     const cd = resp.headers.get('Content-Disposition')||'';
     const m = cd.match(/filename="?([^"]+)"?/);
@@ -472,7 +474,17 @@ $('form').addEventListener('submit', async e => {
     const a = document.createElement('a');
     a.href=url; a.download=fname; a.click();
     URL.revokeObjectURL(url);
-    showStatus('success',`✓ Download concluído: ${fname}`);
+    if(faltantes > 0) {
+      showStatus('warn',
+        `✓ Download concluído: ${fname}<br><br>`+
+        `⚠️ <strong>${faltantes} nota(s) recebida(s) podem estar faltando.</strong> `+
+        `Elas constam no portal nacional, mas não foram distribuídas ao seu certificado `+
+        `(emitidas por municípios de sistema próprio, ex.: São Paulo, Osasco). `+
+        `Veja o arquivo <strong>RELATORIO_NOTAS_FALTANTES.csv</strong> dentro do ZIP — `+
+        `baixe essas notas manualmente no portal ou solicite o XML ao prestador.`);
+    } else {
+      showStatus('success',`✓ Download concluído: ${fname}`);
+    }
     loadUserInfo();  // refresh usage counter
   } catch(err) {
     showStatus('error',`Erro de conexão: ${err.message}`);

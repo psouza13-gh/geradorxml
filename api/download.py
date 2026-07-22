@@ -4,7 +4,7 @@ Returns a ZIP containing all NFS-e XMLs + an XLSX summary.
 Certificate is never persisted — only used during the request lifecycle.
 """
 
-import sys, os, io, json, csv, zipfile, tempfile, re
+import sys, os, io, json, zipfile, tempfile, re
 import xml.etree.ElementTree as ET
 from datetime import date
 
@@ -197,7 +197,7 @@ COLUNAS = [
 ]
 
 
-def build_xlsx(rows: list) -> bytes:
+def build_xlsx(rows: list, faltantes: list | None = None) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
@@ -260,6 +260,10 @@ def build_xlsx(rows: list) -> bytes:
     # Auto-filter
     ws.auto_filter.ref = ws.dimensions
 
+    # Aba extra: notas recebidas que constam no portal mas não vieram (reconciliação)
+    if faltantes:
+        add_sheet_faltantes(wb, faltantes)
+
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -275,20 +279,66 @@ def _fmt_cnpj(cnpj: str) -> str:
     return cnpj
 
 
-def _csv_faltantes(faltantes: list) -> bytes:
-    """CSV (UTF-8 BOM, separador ';') das notas recebidas que constam no portal
-    mas não foram distribuídas via certificado. Abre direto no Excel BR."""
-    buf = io.StringIO()
-    w = csv.writer(buf, delimiter=";")
-    w.writerow(["Chave de Acesso", "CNPJ Prestador", "Nome Prestador",
-                "Municipio (cod. IBGE)", "Observacao"])
-    obs = ("Consta no portal nacional, mas nao foi distribuida ao tomador via "
-           "certificado (DF-e). Emitida por municipio de sistema proprio. "
-           "Baixe manualmente no portal (www.nfse.gov.br) ou solicite o XML ao prestador.")
-    for f in faltantes:
-        w.writerow([f.get("chave", ""), _fmt_cnpj(f.get("cnpj_prestador", "")),
-                    f.get("nome_prestador", ""), f.get("municipio", ""), obs])
-    return ("﻿" + buf.getvalue()).encode("utf-8")
+COLUNAS_FALTANTES = [
+    ("chave",          "Chave de Acesso",        55),
+    ("cnpj_prestador", "CNPJ Prestador",         20),
+    ("nome_prestador", "Nome Prestador",         40),
+    ("municipio",      "Município Emissor (IBGE)", 22),
+    ("como_obter",     "Como Obter",             60),
+]
+
+OBS_FALTANTE = (
+    "Consta no portal nacional, mas não foi distribuída ao seu certificado (DF-e). "
+    "Baixe manualmente em www.nfse.gov.br (Notas Recebidas) ou solicite o XML ao prestador."
+)
+
+
+def add_sheet_faltantes(wb, faltantes: list) -> None:
+    """Add a 'Notas Faltantes' worksheet to the workbook, styled like the main
+    sheet. Chave de Acesso is written as TEXT (Excel would mangle a 50-digit
+    number into scientific notation, losing digits)."""
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+    ws = wb.create_sheet("Notas Faltantes")
+
+    header_font  = Font(bold=True, color="FFFFFF", size=11)
+    header_fill  = PatternFill("solid", fgColor="B45309")   # âmbar — sinaliza atenção
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    thin_border  = Border(
+        left=Side(style="thin"), right=Side(style="thin"),
+        top=Side(style="thin"),  bottom=Side(style="thin"),
+    )
+    alt_fill = PatternFill("solid", fgColor="FEF3C7")       # âmbar claro (zebra)
+
+    for col, (_, label, width) in enumerate(COLUNAS_FALTANTES, 1):
+        cell = ws.cell(row=1, column=col, value=label)
+        cell.font, cell.fill = header_font, header_fill
+        cell.alignment, cell.border = header_align, thin_border
+        ws.column_dimensions[cell.column_letter].width = width
+
+    ws.row_dimensions[1].height = 30
+    ws.freeze_panes = "A2"
+
+    for r, f in enumerate(faltantes, 2):
+        alt = r % 2 == 0
+        valores = {
+            "chave":          str(f.get("chave", "")),
+            "cnpj_prestador": _fmt_cnpj(f.get("cnpj_prestador", "")),
+            "nome_prestador": f.get("nome_prestador", "") or "(consulte pelo CNPJ)",
+            "municipio":      f.get("municipio", ""),
+            "como_obter":     OBS_FALTANTE,
+        }
+        for col, (key, _, _) in enumerate(COLUNAS_FALTANTES, 1):
+            cell = ws.cell(row=r, column=col, value=valores[key])
+            cell.border = thin_border
+            cell.alignment = Alignment(vertical="center",
+                                       wrap_text=(key == "como_obter"))
+            if key in ("chave", "municipio"):
+                cell.number_format = "@"   # força TEXTO — preserva os 50 dígitos
+            if alt:
+                cell.fill = alt_fill
+
+    ws.auto_filter.ref = ws.dimensions
 
 
 # ── Main endpoint ─────────────────────────────────────────────────────────────
@@ -472,7 +522,7 @@ def download():
                 if notas_faltantes:
                     messages.append(
                         f"  ⚠ {len(notas_faltantes)} nota(s) recebida(s) constam no portal mas "
-                        f"não vieram pelo certificado — ver RELATORIO_NOTAS_FALTANTES.csv no ZIP."
+                        f"não vieram pelo certificado — ver aba 'Notas Faltantes' na planilha."
                     )
                 else:
                     messages.append("  Reconciliação com o portal: nenhuma nota recebida faltante.")
@@ -506,13 +556,9 @@ def download():
                 content = xml.encode("utf-8") if isinstance(xml, str) else xml
                 zf.writestr(fname, content)
 
-            # XLSX
-            xlsx_bytes = build_xlsx(xlsx_rows)
+            # XLSX (inclui a aba "Notas Faltantes" quando a reconciliação achou lacunas)
+            xlsx_bytes = build_xlsx(xlsx_rows, faltantes=notas_faltantes)
             zf.writestr(f"NFS-e_{cnpj}_{periodo}{tipo_suffix}.xlsx", xlsx_bytes)
-
-            # Relatório de notas faltantes (reconciliação com o portal)
-            if notas_faltantes:
-                zf.writestr("RELATORIO_NOTAS_FALTANTES.csv", _csv_faltantes(notas_faltantes))
 
         zip_buf.seek(0)
         _log_download(user_id, cnpj, True)
